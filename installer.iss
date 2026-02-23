@@ -2,7 +2,8 @@
 
 #define MyAppName "ClearShot"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "ClearShot"
+#define MyAppPublisher "GoblinRules"
+#define MyAppURL "https://github.com/GoblinRules/ClearShot"
 #define MyAppExeName "ClearShot.exe"
 #define MyAppDescription "Lightweight screenshot tool for Windows"
 
@@ -10,14 +11,20 @@
 AppId={{A7D12F3E-8B4C-4E5A-9F6D-1C2E3A4B5D6F}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}.0
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppSupportURL=https://github.com/clearshot
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}/issues
+AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
+LicenseFile=LICENSE
 AllowNoIcons=yes
 OutputDir=installer_output
 OutputBaseFilename=ClearShot_Setup_{#MyAppVersion}
-SetupIconFile=resources\icon.ico
+SetupIconFile=assets\icon.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
