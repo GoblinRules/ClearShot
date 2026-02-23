@@ -179,6 +179,14 @@ ClearShot/
 
 ---
 
+## ⚠️ Disclaimer
+
+This software is provided "as is", without warranty of any kind. Use it at your own risk. The authors are not liable for any damages or data loss resulting from its use.
+
+**Privacy & Security:** ClearShot captures screen content and stores images locally on your machine. It does **not** transmit any data externally. However, screenshots may contain sensitive information — be mindful of what you capture, where you save it, and with whom you share it. You are solely responsible for the content you capture and distribute.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
