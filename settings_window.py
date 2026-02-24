@@ -2,16 +2,25 @@
 
 import os
 import sys
+import json
+import ssl
+import threading
+import urllib.request
+import urllib.error
+import webbrowser
 import winreg
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox,
     QFileDialog, QFormLayout, QGroupBox, QMessageBox,
     QKeySequenceEdit, QSpacerItem, QSizePolicy, QFrame,
+    QScrollArea,
 )
-from constants import APP_NAME, DEFAULT_HOTKEYS, IMAGE_FORMATS
+from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS
+
+GITHUB_REPO = "GoblinRules/ClearShot"
 
 
 class HotkeyEdit(QWidget):
@@ -212,6 +221,7 @@ class SettingsWindow(QDialog):
         tabs.addTab(self._create_general_tab(), "General")
         tabs.addTab(self._create_hotkeys_tab(), "Hotkeys")
         tabs.addTab(self._create_startup_tab(), "Startup")
+        tabs.addTab(self._create_about_tab(), "About")
         layout.addWidget(tabs)
 
         # Bottom buttons
@@ -308,6 +318,189 @@ class SettingsWindow(QDialog):
         layout.addWidget(startup_group)
         layout.addStretch()
         return tab
+
+    def _create_about_tab(self) -> QWidget:
+        """Create the About tab with Help, About info, and Check for Updates."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(8)
+
+        # --- About info at the top ---
+        about_group = QGroupBox(f"About {APP_NAME}")
+        about_layout = QVBoxLayout(about_group)
+        about_html = (
+            f"<h2 style='margin: 0;'>{APP_NAME} v{APP_VERSION}</h2>"
+            f"<p>A lightweight, privacy-respecting screenshot tool for Windows.</p>"
+            f"<p>• Region & fullscreen capture<br>"
+            f"• Annotation tools (pen, arrow, text, blur, and more)<br>"
+            f"• Copy to clipboard or save to file<br>"
+            f"• Global hotkeys</p>"
+            f"<p><a href='https://github.com/{GITHUB_REPO}' style='color: #0099FF;'>GitHub</a></p>"
+            f"<p style='color: gray;'>No uploads. No telemetry. Just screenshots.</p>"
+        )
+        about_label = QLabel(about_html)
+        about_label.setWordWrap(True)
+        about_label.setTextFormat(Qt.TextFormat.RichText)
+        about_label.setOpenExternalLinks(True)
+        about_layout.addWidget(about_label)
+        layout.addWidget(about_group)
+
+        # --- Check for Updates button ---
+        update_layout = QHBoxLayout()
+        self._update_btn = QPushButton("🔄 Check for Updates")
+        self._update_btn.setStyleSheet(
+            "QPushButton { background: #0078D4; color: white; border: none; "
+            "border-radius: 6px; padding: 10px 24px; font-weight: bold; font-size: 13px; }"
+            "QPushButton:hover { background: #1a8ae8; }"
+            "QPushButton:disabled { background: #555; color: #999; }"
+        )
+        self._update_btn.clicked.connect(self._check_for_updates)
+        update_layout.addStretch()
+        update_layout.addWidget(self._update_btn)
+        update_layout.addStretch()
+        layout.addLayout(update_layout)
+
+        # --- Help section (scrollable) ---
+        help_group = QGroupBox("Help")
+        help_layout = QVBoxLayout(help_group)
+        help_layout.setContentsMargins(0, 8, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 8)
+
+        help_html = f"""
+        <h3 style="color: #0099FF;">🎯 Taking Screenshots</h3>
+        <table cellpadding="6" style="margin-left: 8px;">
+          <tr><td style="color: #ccc;"><b>Region Capture</b></td>
+              <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Print Screen</code></td></tr>
+          <tr><td style="color: #ccc;"><b>Fullscreen Capture</b></td>
+              <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Print Screen</code></td></tr>
+        </table>
+        <p style="color: #aaa; margin-left: 8px;">You can also right-click the tray icon to capture.</p>
+
+        <h3 style="color: #0099FF;">📷 Region Capture</h3>
+        <ol style="color: #ccc; margin-left: 8px;">
+          <li>Press <b>Print Screen</b> (or your custom hotkey)</li>
+          <li>Click and drag to select an area</li>
+          <li>Release to see options:<br>
+            &nbsp;&nbsp;📋 <b>Copy</b> — Copy to clipboard<br>
+            &nbsp;&nbsp;💾 <b>Save</b> — Save with file dialog<br>
+            &nbsp;&nbsp;⚡ <b>Quick Save</b> — Save to your default folder<br>
+            &nbsp;&nbsp;✏️ <b>Edit</b> — Open annotation editor<br>
+            &nbsp;&nbsp;✕ <b>Cancel</b> — Discard</li>
+        </ol>
+
+        <h3 style="color: #0099FF;">✏️ Annotation Tools</h3>
+        <table cellpadding="4" style="margin-left: 8px;">
+          <tr><td style="color: #ccc;">✏️ <b>Pen</b></td><td style="color: #aaa;">Freehand drawing</td></tr>
+          <tr><td style="color: #ccc;">─ <b>Line</b></td><td style="color: #aaa;">Straight lines</td></tr>
+          <tr><td style="color: #ccc;">→ <b>Arrow</b></td><td style="color: #aaa;">Arrows with heads</td></tr>
+          <tr><td style="color: #ccc;">□ <b>Rectangle</b></td><td style="color: #aaa;">Outlined rectangles</td></tr>
+          <tr><td style="color: #ccc;">■ <b>Filled Rect</b></td><td style="color: #aaa;">Solid rectangles</td></tr>
+          <tr><td style="color: #ccc;">○ <b>Ellipse</b></td><td style="color: #aaa;">Circles and ovals</td></tr>
+          <tr><td style="color: #ccc;">T <b>Text</b></td><td style="color: #aaa;">Click to type text</td></tr>
+          <tr><td style="color: #ccc;">▪ <b>Blur</b></td><td style="color: #aaa;">Blur sensitive areas</td></tr>
+          <tr><td style="color: #ccc;"># <b>Counter</b></td><td style="color: #aaa;">Numbered markers (1, 2, 3…)</td></tr>
+        </table>
+        <p style="color: #aaa; margin-left: 8px;">Use the color palette and size slider to customize.</p>
+
+        <h3 style="color: #0099FF;">💡 Tips</h3>
+        <ul style="color: #ccc; margin-left: 8px;">
+          <li>Double-click the tray icon to start a region capture</li>
+          <li>Use <code style="background: #333; padding: 1px 6px; border-radius: 3px;">Esc</code> to cancel a capture</li>
+          <li>Quick Save uses the filename pattern from Settings</li>
+          <li>Captured images are saved to <b>Pictures/ClearShot</b> by default</li>
+        </ul>
+        """
+
+        help_label = QLabel(help_html)
+        help_label.setWordWrap(True)
+        help_label.setTextFormat(Qt.TextFormat.RichText)
+        content_layout.addWidget(help_label)
+        scroll.setWidget(content)
+        help_layout.addWidget(scroll)
+        layout.addWidget(help_group)
+
+        return tab
+
+    def _check_for_updates(self):
+        """Check GitHub releases for a newer version."""
+        self._update_btn.setEnabled(False)
+        self._update_btn.setText("⏳ Checking...")
+
+        def _do_check():
+            try:
+                url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+                req = urllib.request.Request(url, headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": APP_NAME,
+                })
+                # Try with default SSL first, fall back to unverified if certs missing
+                try:
+                    ctx = ssl.create_default_context()
+                    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+                except ssl.SSLError:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+                data = json.loads(resp.read().decode("utf-8"))
+                resp.close()
+                latest_tag = data.get("tag_name", "").lstrip("vV")
+                html_url = data.get("html_url", "")
+                QTimer.singleShot(0, lambda: _show_result(latest_tag, html_url))
+            except Exception as e:
+                QTimer.singleShot(0, lambda: _show_error(str(e)))
+
+        def _version_tuple(v: str):
+            try:
+                return tuple(int(x) for x in v.split("."))
+            except ValueError:
+                return (0, 0, 0)
+
+        def _show_result(latest: str, url: str):
+            self._update_btn.setEnabled(True)
+            self._update_btn.setText("🔄 Check for Updates")
+            current = APP_VERSION.lstrip("vV")
+            if not latest:
+                _show_error("Could not determine the latest version.")
+                return
+            if _version_tuple(latest) > _version_tuple(current):
+                reply = QMessageBox.information(
+                    self,
+                    "Update Available",
+                    f"<h3>🎉 A new version is available!</h3>"
+                    f"<p>Current: <b>v{current}</b><br>"
+                    f"Latest: <b>v{latest}</b></p>"
+                    f"<p>Visit the releases page to download the update.</p>",
+                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Close,
+                    QMessageBox.StandardButton.Open,
+                )
+                if reply == QMessageBox.StandardButton.Open:
+                    webbrowser.open(url or f"https://github.com/{GITHUB_REPO}/releases")
+            else:
+                QMessageBox.information(
+                    self,
+                    "Up to Date",
+                    f"<h3>✅ You're up to date!</h3>"
+                    f"<p><b>v{current}</b> is the latest version.</p>",
+                )
+
+        def _show_error(msg: str):
+            self._update_btn.setEnabled(True)
+            self._update_btn.setText("🔄 Check for Updates")
+            QMessageBox.warning(
+                self,
+                "Update Check Failed",
+                f"<p>Could not check for updates.</p>"
+                f"<p style='color: gray;'>{msg}</p>",
+            )
+
+        threading.Thread(target=_do_check, daemon=True).start()
 
     def _load_values(self):
         """Load current config values into the UI."""
