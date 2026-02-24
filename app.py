@@ -151,10 +151,25 @@ class ClearShotApp:
             )
 
     def _create_app_icon(self) -> QIcon:
-        """Create the application icon from PNG."""
+        """Create the application icon using pre-rendered PNGs from the icon pack."""
         base = os.path.dirname(__file__)
+        icon = QIcon()
 
-        # Try loading PNG icon (better quality than .ico at small sizes)
+        # Try loading pre-rendered PNGs at exact sizes (pixel-perfect, no scaling needed)
+        icon_pack = os.path.join(base, "assets", "ClearShot_Icon_Pack")
+        if os.path.isdir(icon_pack):
+            # Skip 16px — Qt picks the smallest available for the tray,
+            # so starting at 24px forces it to use a crisper icon
+            for sz in [24, 32, 48, 64, 128, 256]:
+                png_path = os.path.join(icon_pack, f"ClearShot_icon_{sz}x{sz}.png")
+                if os.path.exists(png_path):
+                    pm = QPixmap(png_path)
+                    if not pm.isNull():
+                        icon.addPixmap(pm)
+            if not icon.isNull():
+                return icon
+
+        # Fallback: scale from a single large PNG
         for candidate in [
             "assets/icon.png", "assets/icon2.png", "resources/icon.png",
         ]:
@@ -163,9 +178,6 @@ class ClearShotApp:
                 source = QPixmap(icon_path)
                 if source.isNull():
                     continue
-                icon = QIcon()
-                # Skip 16px — Qt picks the smallest available for the tray,
-                # so starting at 32px forces it to scale from a crisper source
                 for sz in [32, 48, 64, 128, 256]:
                     scaled = source.scaled(
                         sz, sz,
@@ -175,7 +187,7 @@ class ClearShotApp:
                     icon.addPixmap(scaled)
                 return icon
 
-        # Fallback: generate a simple crosshair icon
+        # Last resort: generate a simple crosshair icon
         size = 64
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -183,12 +195,10 @@ class ClearShotApp:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background circle
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 120, 212))
         painter.drawEllipse(2, 2, size - 4, size - 4)
 
-        # Crosshair
         from PyQt6.QtGui import QPen
         pen = QPen(QColor(255, 255, 255), 3)
         painter.setPen(pen)
