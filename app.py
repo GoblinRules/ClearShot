@@ -50,7 +50,7 @@ class HotkeyThread(QThread):
                 keyboard_module.add_hotkey(
                     region_key,
                     lambda: self.region_capture_triggered.emit(),
-                    suppress=True,
+                    suppress=False,
                 )
                 self._hooks.append(region_key)
             except Exception as e:
@@ -62,7 +62,7 @@ class HotkeyThread(QThread):
                 keyboard_module.add_hotkey(
                     fullscreen_key,
                     lambda: self.fullscreen_capture_triggered.emit(),
-                    suppress=True,
+                    suppress=False,
                 )
                 self._hooks.append(fullscreen_key)
             except Exception as e:
