@@ -1,5 +1,7 @@
 """ClearShot — System tray application and hotkey manager."""
 
+import ctypes
+import ctypes.wintypes
 import os
 import sys
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -15,84 +17,167 @@ from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
 from constants import APP_NAME, APP_VERSION
 
+# ── Win32 constants for RegisterHotKey ────────────────────────────────
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+WM_APP_REFRESH = 0x8001  # custom message to trigger re-registration
+WM_APP_QUIT = 0x8002     # custom message to exit the message loop
+
+# Hotkey IDs
+_HOTKEY_REGION = 1
+_HOTKEY_FULLSCREEN = 2
+
+# Virtual-key code map (lowercase name → VK code)
+_VK_MAP = {
+    "print screen": 0x2C,  # VK_SNAPSHOT
+    "snapshot": 0x2C,
+    "prtsc": 0x2C,
+    "escape": 0x1B, "esc": 0x1B,
+    "space": 0x20,
+    "enter": 0x0D, "return": 0x0D,
+    "tab": 0x09,
+    "backspace": 0x08,
+    "delete": 0x2E, "del": 0x2E,
+    "insert": 0x2D, "ins": 0x2D,
+    "home": 0x24, "end": 0x23,
+    "pageup": 0x21, "page up": 0x21,
+    "pagedown": 0x22, "page down": 0x22,
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "numlock": 0x90, "scrolllock": 0x91, "capslock": 0x14,
+    "pause": 0x13,
+}
+# F1–F24
+for _i in range(1, 25):
+    _VK_MAP[f"f{_i}"] = 0x70 + (_i - 1)
+# 0–9
+for _i in range(10):
+    _VK_MAP[str(_i)] = 0x30 + _i
+# A–Z
+for _c in range(26):
+    _VK_MAP[chr(ord("a") + _c)] = 0x41 + _c
+
+_MODIFIER_MAP = {
+    "ctrl": MOD_CONTROL,
+    "control": MOD_CONTROL,
+    "alt": MOD_ALT,
+    "shift": MOD_SHIFT,
+    "win": MOD_WIN,
+    "super": MOD_WIN,
+    "meta": MOD_WIN,
+}
+
+
+def _parse_hotkey(combo: str):
+    """Parse a hotkey string like 'ctrl+shift+f5' into (modifiers, vk_code).
+
+    Returns (None, None) if the combo cannot be parsed.
+    """
+    if not combo:
+        return None, None
+    parts = [p.strip().lower() for p in combo.split("+")]
+    modifiers = MOD_NOREPEAT  # always set to avoid auto-repeat spam
+    vk = None
+    for part in parts:
+        if part in _MODIFIER_MAP:
+            modifiers |= _MODIFIER_MAP[part]
+        elif part in _VK_MAP:
+            vk = _VK_MAP[part]
+        else:
+            # Unknown key name
+            print(f"Warning: unknown key '{part}' in hotkey '{combo}'")
+            return None, None
+    if vk is None:
+        return None, None
+    return modifiers, vk
+
 
 class HotkeyThread(QThread):
-    """Listens for global hotkeys in a background thread."""
-    
+    """Listens for global hotkeys using the Win32 RegisterHotKey API.
+
+    This is the OS-native approach: registered hotkeys are consumed by Windows
+    and never forwarded to the focused application, and modifier key-up events
+    are not affected (no stuck keys).
+    """
+
     region_capture_triggered = pyqtSignal()
     fullscreen_capture_triggered = pyqtSignal()
 
     def __init__(self, config: Config):
         super().__init__()
         self._config = config
-        self._running = True
-        self._hooks = []
+        self._thread_id = None  # set once the thread starts
 
     def run(self):
-        try:
-            import keyboard
-            self._register_hotkeys(keyboard)
-            # Keep thread alive
-            while self._running:
-                self.msleep(100)
-        except ImportError:
-            print("Warning: 'keyboard' module not available. Global hotkeys disabled.")
-        except Exception as e:
-            print(f"Hotkey thread error: {e}")
+        user32 = ctypes.windll.user32
+        self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        self._register_all(user32)
 
-    def _register_hotkeys(self, keyboard_module):
-        """Register global hotkeys based on current config."""
-        self._unregister_all(keyboard_module)
+        # Pump messages until told to stop
+        msg = ctypes.wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == WM_HOTKEY:
+                hotkey_id = msg.wParam
+                if hotkey_id == _HOTKEY_REGION:
+                    self.region_capture_triggered.emit()
+                elif hotkey_id == _HOTKEY_FULLSCREEN:
+                    self.fullscreen_capture_triggered.emit()
+            elif msg.message == WM_APP_REFRESH:
+                self._unregister_all(user32)
+                self._register_all(user32)
+            elif msg.message == WM_APP_QUIT:
+                break
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
 
+        self._unregister_all(user32)
+
+    def _register_all(self, user32):
+        """Register both hotkeys from current config."""
         region_key = self._config.get_hotkey("region_capture")
-        if region_key:
-            try:
-                keyboard_module.add_hotkey(
-                    region_key,
-                    lambda: self.region_capture_triggered.emit(),
-                    suppress=False,
-                )
-                self._hooks.append(region_key)
-            except Exception as e:
-                print(f"Failed to register region hotkey '{region_key}': {e}")
+        mods, vk = _parse_hotkey(region_key)
+        if vk is not None:
+            if not user32.RegisterHotKey(None, _HOTKEY_REGION, mods, vk):
+                print(f"Failed to register region hotkey '{region_key}' "
+                      f"(error {ctypes.GetLastError()})")
+            else:
+                print(f"Registered region hotkey: {region_key}")
 
         fullscreen_key = self._config.get_hotkey("fullscreen_capture")
-        if fullscreen_key:
-            try:
-                keyboard_module.add_hotkey(
-                    fullscreen_key,
-                    lambda: self.fullscreen_capture_triggered.emit(),
-                    suppress=False,
-                )
-                self._hooks.append(fullscreen_key)
-            except Exception as e:
-                print(f"Failed to register fullscreen hotkey '{fullscreen_key}': {e}")
+        mods, vk = _parse_hotkey(fullscreen_key)
+        if vk is not None:
+            if not user32.RegisterHotKey(None, _HOTKEY_FULLSCREEN, mods, vk):
+                print(f"Failed to register fullscreen hotkey '{fullscreen_key}' "
+                      f"(error {ctypes.GetLastError()})")
+            else:
+                print(f"Registered fullscreen hotkey: {fullscreen_key}")
 
-    def _unregister_all(self, keyboard_module):
-        """Remove all registered hotkeys."""
-        for hook in self._hooks:
-            try:
-                keyboard_module.remove_hotkey(hook)
-            except Exception:
-                pass
-        self._hooks.clear()
+    def _unregister_all(self, user32):
+        """Unregister both hotkey IDs (safe to call even if not registered)."""
+        user32.UnregisterHotKey(None, _HOTKEY_REGION)
+        user32.UnregisterHotKey(None, _HOTKEY_FULLSCREEN)
 
     def refresh_hotkeys(self):
-        """Re-register hotkeys after settings change."""
-        try:
-            import keyboard
-            self._register_hotkeys(keyboard)
-        except ImportError:
-            pass
+        """Re-register hotkeys after settings change.
+
+        Posts a message to the thread's message loop so registration
+        happens on the correct thread (required by Win32).
+        """
+        if self._thread_id is not None:
+            ctypes.windll.user32.PostThreadMessageW(
+                self._thread_id, WM_APP_REFRESH, 0, 0,
+            )
 
     def stop(self):
-        self._running = False
-        try:
-            import keyboard
-            self._unregister_all(keyboard)
-        except ImportError:
-            pass
-        self.wait(2000)
+        """Signal the thread to exit."""
+        if self._thread_id is not None:
+            ctypes.windll.user32.PostThreadMessageW(
+                self._thread_id, WM_APP_QUIT, 0, 0,
+            )
+        self.wait(3000)
 
 
 class ClearShotApp:

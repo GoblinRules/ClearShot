@@ -18,8 +18,6 @@ a = Analysis(
         ('resources', 'resources'),
     ] + pyqt6_datas,
     hiddenimports=[
-        'keyboard',
-        'keyboard._winkeyboard',
         'win32clipboard',
         'win32con',
         'pywintypes',
