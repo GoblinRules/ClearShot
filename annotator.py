@@ -19,6 +19,7 @@ from tools import (
     create_tool_item,
 )
 from clipboard_utils import copy_pixmap_to_clipboard
+from icon_utils import ui_icon
 from constants import (
     TOOL_PEN, TOOL_LINE, TOOL_ARROW, TOOL_RECT, TOOL_FILLED_RECT,
     TOOL_ELLIPSE, TOOL_TEXT, TOOL_BLUR, TOOL_COUNTER,
@@ -290,20 +291,21 @@ class AnnotatorWindow(QWidget):
         self._tool_group.setExclusive(True)
 
         tool_defs = [
-            (TOOL_PEN, "✏️", "Pen (P)"),
-            (TOOL_LINE, "━", "Line (L)"),
-            (TOOL_ARROW, "➜", "Arrow (A)"),
-            (TOOL_RECT, "▭", "Rectangle (R)"),
-            (TOOL_FILLED_RECT, "▮", "Highlight (H)"),
-            (TOOL_ELLIPSE, "⬭", "Ellipse (E)"),
-            (TOOL_TEXT, "T", "Text (T)"),
-            (TOOL_BLUR, "▦", "Blur (B)"),
-            (TOOL_COUNTER, "#", "Counter (N)"),
+            (TOOL_PEN, "pen", "Pen (P)"),
+            (TOOL_LINE, "line", "Line (L)"),
+            (TOOL_ARROW, "arrow", "Arrow (A)"),
+            (TOOL_RECT, "rect", "Rectangle (R)"),
+            (TOOL_FILLED_RECT, "filled_rect", "Highlight (H)"),
+            (TOOL_ELLIPSE, "ellipse", "Ellipse (E)"),
+            (TOOL_TEXT, "text", "Text (T)"),
+            (TOOL_BLUR, "blur", "Blur (B)"),
+            (TOOL_COUNTER, "counter", "Counter (N)"),
         ]
 
-        for tool_id, icon_text, tooltip in tool_defs:
+        for tool_id, icon_name, tooltip in tool_defs:
             btn = QToolButton()
-            btn.setText(icon_text)
+            btn.setIcon(ui_icon(icon_name))
+            btn.setIconSize(QSize(18, 18))
             btn.setToolTip(tooltip)
             btn.setCheckable(True)
             btn.setProperty("tool_id", tool_id)
@@ -330,7 +332,10 @@ class AnnotatorWindow(QWidget):
             self._color_buttons.append(btn)
 
         # Custom color button
-        custom_color_btn = QPushButton("🎨")
+        custom_color_btn = QPushButton()
+        custom_color_btn.setIcon(ui_icon("palette"))
+        custom_color_btn.setIconSize(QSize(16, 16))
+        custom_color_btn.setFixedSize(28, 24)
         custom_color_btn.setToolTip("Custom color")
         custom_color_btn.clicked.connect(self._pick_custom_color)
         layout.addWidget(custom_color_btn)
@@ -355,17 +360,23 @@ class AnnotatorWindow(QWidget):
         layout.addStretch()
 
         # Undo / Redo
-        undo_btn = QPushButton("↶ Undo")
+        undo_btn = QPushButton("Undo")
+        undo_btn.setIcon(ui_icon("undo"))
+        undo_btn.setIconSize(QSize(16, 16))
         undo_btn.setToolTip("Undo (Ctrl+Z)")
         undo_btn.clicked.connect(self._canvas.undo)
         layout.addWidget(undo_btn)
 
-        redo_btn = QPushButton("↷ Redo")
+        redo_btn = QPushButton("Redo")
+        redo_btn.setIcon(ui_icon("redo"))
+        redo_btn.setIconSize(QSize(16, 16))
         redo_btn.setToolTip("Redo (Ctrl+Y)")
         redo_btn.clicked.connect(self._canvas.redo)
         layout.addWidget(redo_btn)
 
-        clear_btn = QPushButton("🗑 Clear")
+        clear_btn = QPushButton("Clear")
+        clear_btn.setIcon(ui_icon("trash"))
+        clear_btn.setIconSize(QSize(16, 16))
         clear_btn.setToolTip("Clear all annotations")
         clear_btn.clicked.connect(self._canvas.clear_all)
         layout.addWidget(clear_btn)
@@ -394,7 +405,9 @@ class AnnotatorWindow(QWidget):
         layout.setContentsMargins(8, 6, 8, 6)
 
         # Copy to clipboard
-        copy_btn = QPushButton("📋 Copy")
+        copy_btn = QPushButton("Copy")
+        copy_btn.setIcon(ui_icon("copy"))
+        copy_btn.setIconSize(QSize(16, 16))
         copy_btn.setToolTip("Copy to clipboard (Ctrl+C)")
         copy_btn.setStyleSheet("""
             QPushButton {
@@ -410,7 +423,9 @@ class AnnotatorWindow(QWidget):
         layout.addWidget(copy_btn)
 
         # Save
-        save_btn = QPushButton("💾 Save")
+        save_btn = QPushButton("Save")
+        save_btn.setIcon(ui_icon("save"))
+        save_btn.setIconSize(QSize(16, 16))
         save_btn.setToolTip("Save to file (Ctrl+S)")
         save_btn.setStyleSheet("""
             QPushButton {
@@ -426,7 +441,9 @@ class AnnotatorWindow(QWidget):
         layout.addWidget(save_btn)
 
         # Quick Save
-        qsave_btn = QPushButton("⚡ Quick Save")
+        qsave_btn = QPushButton("Quick Save")
+        qsave_btn.setIcon(ui_icon("quick_save"))
+        qsave_btn.setIconSize(QSize(16, 16))
         qsave_btn.setToolTip("Quick save (Ctrl+Shift+S)")
         qsave_btn.setStyleSheet("""
             QPushButton {
@@ -444,7 +461,9 @@ class AnnotatorWindow(QWidget):
         layout.addStretch()
 
         # Close
-        close_btn = QPushButton("✕ Close")
+        close_btn = QPushButton("Close")
+        close_btn.setIcon(ui_icon("close"))
+        close_btn.setIconSize(QSize(16, 16))
         close_btn.setToolTip("Discard and close (Escape)")
         close_btn.setStyleSheet("""
             QPushButton {

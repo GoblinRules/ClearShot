@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QWidget, QApplication, QColorDialog, QLineEdit, QPus
 from capture import capture_all_monitors
 from clipboard_utils import copy_pixmap_to_clipboard
 from constants import DEFAULT_SAVE_DIR, IMAGE_FORMATS
+from icon_utils import paint_icon, ui_icon
 
 
 class SelectionOverlay(QWidget):
@@ -165,7 +166,7 @@ class SelectionOverlay(QWidget):
 
             # Draw text tool hint
             if self._inline_tool == 'text' and not self._inline_drawing and not self._text_edit:
-                hint_text = '\u270E  Click and drag to draw a text box'
+                hint_text = 'Click and drag to draw a text box'
                 hint_font = QFont('Segoe UI', 12, QFont.Weight.Bold)
                 painter.setFont(hint_font)
                 fm = painter.fontMetrics()
@@ -656,15 +657,15 @@ class SelectionOverlay(QWidget):
 
         # ── Right-side vertical tool strip ──
         tools = [
-            ('pen',       '\u270E'),   # ✎ pencil
-            ('line',      '\u2500'),   # ─ horizontal line
-            ('arrow',     '\u2192'),   # → right arrow
-            ('rect',      '\u25A1'),   # □ white square
-            ('text',      'A'),         # text
-            ('blur',      '\u2592'),   # ▒ medium shade
-            ('highlight', '\u25AE'),   # ▮ black vertical rectangle
-            ('undo',      '\u21B6'),   # ↶ undo
-            ('color',     None),        # color swatch (painted below)
+            'pen',
+            'line',
+            'arrow',
+            'rect',
+            'text',
+            'blur',
+            'highlight',
+            'undo',
+            'color',
         ]
         strip_x = sel_rect.right() + 6
         strip_y = sel_rect.top()
@@ -685,7 +686,7 @@ class SelectionOverlay(QWidget):
             'highlight': 'Highlight', 'undo': 'Undo', 'color': 'Color',
         }
 
-        for i, (tool_name, icon) in enumerate(tools):
+        for i, tool_name in enumerate(tools):
             y = strip_y + i * (btn_size + btn_gap)
             btn_rect = QRectF(strip_x, y, btn_size, btn_size)
             self._tool_btn_rects[tool_name] = btn_rect
@@ -710,12 +711,7 @@ class SelectionOverlay(QWidget):
                 painter.setBrush(QBrush(QColor(self._inline_color)))
                 painter.drawRoundedRect(swatch, 2, 2)
             else:
-                # Icon text
-                painter.setPen(QPen(QColor(255, 255, 255)))
-                font = QFont('Segoe UI Symbol', 10)
-                font.setBold(tool_name == 'text')
-                painter.setFont(font)
-                painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, icon)
+                paint_icon(painter, tool_name, btn_rect, QColor(255, 255, 255))
 
         # ── Tooltip for hovered tool ──
         if self._hovered_tool and self._hovered_tool in tool_labels:
@@ -739,13 +735,13 @@ class SelectionOverlay(QWidget):
 
         # ── Bottom horizontal action strip ──
         actions = [
-            ('copy',  'Copy',  QColor(0, 120, 212)),
-            ('save',  'Save',  QColor(16, 124, 16)),
-            ('edit',  'Edit',  QColor(80, 80, 80)),
-            ('close', '\u2715', QColor(100, 40, 40)),
+            ('copy', 'Copy', QColor(0, 120, 212), 'copy'),
+            ('save', 'Save', QColor(16, 124, 16), 'save'),
+            ('edit', 'Edit', QColor(80, 80, 80), 'pen'),
+            ('close', '', QColor(100, 40, 40), 'close'),
         ]
 
-        action_btn_w = 44
+        action_btn_w = 54
         total_w = len(actions) * (action_btn_w + btn_gap) - btn_gap
         action_x = sel_rect.right() - total_w + 1
         action_y = sel_rect.bottom() + 6
@@ -754,7 +750,7 @@ class SelectionOverlay(QWidget):
         if action_y + btn_size + 4 > self.height():
             action_y = sel_rect.top() - btn_size - 10
 
-        for i, (action_name, label, bg) in enumerate(actions):
+        for i, (action_name, label, bg, icon_name) in enumerate(actions):
             x = action_x + i * (action_btn_w + btn_gap)
             btn_rect = QRectF(x, action_y, action_btn_w, btn_size)
             self._action_btn_rects[action_name] = btn_rect
@@ -769,12 +765,19 @@ class SelectionOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(btn_rect, corner_radius, corner_radius)
 
-            # Label text
-            painter.setPen(QPen(QColor(255, 255, 255)))
-            font = QFont('Segoe UI', 9)
-            font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, label)
+            if label:
+                icon_rect = QRectF(btn_rect.left() + 6, btn_rect.top() + 4, 16, 16)
+                paint_icon(painter, icon_name, icon_rect, QColor(255, 255, 255))
+
+                painter.setPen(QPen(QColor(255, 255, 255)))
+                font = QFont('Segoe UI', 8)
+                font.setBold(True)
+                painter.setFont(font)
+                text_rect = btn_rect.adjusted(21, 0, -3, 0)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
+            else:
+                icon_rect = QRectF(btn_rect.left() + 20, btn_rect.top() + 5, 14, 14)
+                paint_icon(painter, icon_name, icon_rect, QColor(255, 255, 255))
 
     # ── Inline drawing rendering ─────────────────────────────────────
 
@@ -973,8 +976,10 @@ class SelectionOverlay(QWidget):
         bx = rect.left()
         by = rect.bottom() + 3
 
-        # ✓ Confirm button
-        confirm_btn = QPushButton('\u2713', self)
+        # Confirm button
+        confirm_btn = QPushButton(self)
+        confirm_btn.setIcon(ui_icon("check"))
+        confirm_btn.setIconSize(QSize(14, 14))
         confirm_btn.setFixedSize(btn_size, btn_size)
         confirm_btn.move(bx, by)
         confirm_btn.setStyleSheet(btn_style.replace('#555', '#2a7a2a'))
@@ -982,8 +987,10 @@ class SelectionOverlay(QWidget):
         confirm_btn.clicked.connect(self._commit_inline_text)
         confirm_btn.show()
 
-        # ✗ Cancel button
-        cancel_btn = QPushButton('\u2717', self)
+        # Cancel button
+        cancel_btn = QPushButton(self)
+        cancel_btn.setIcon(ui_icon("close"))
+        cancel_btn.setIconSize(QSize(14, 14))
         cancel_btn.setFixedSize(btn_size, btn_size)
         cancel_btn.move(bx + btn_size + 2, by)
         cancel_btn.setStyleSheet(btn_style.replace('#555', '#7a2a2a'))
@@ -1009,8 +1016,10 @@ class SelectionOverlay(QWidget):
         inc_btn.clicked.connect(self._increase_text_font)
         inc_btn.show()
 
-        # ⤡ Move handle (above text box, left)
-        move_btn = QPushButton('\u2630', self)
+        # Move handle (above text box, left)
+        move_btn = QPushButton(self)
+        move_btn.setIcon(ui_icon("move"))
+        move_btn.setIconSize(QSize(14, 14))
         move_btn.setFixedSize(btn_size, btn_size)
         move_btn.move(rect.left(), rect.top() - btn_size - 2)
         move_btn.setStyleSheet(btn_style)
@@ -1020,8 +1029,10 @@ class SelectionOverlay(QWidget):
         move_btn.mousePressEvent = self._text_box_move_press
         move_btn.mouseMoveEvent = self._text_box_move_drag
 
-        # ⤡ Resize grip (bottom-right corner)
-        resize_btn = QPushButton('\u2921', self)
+        # Resize grip (bottom-right corner)
+        resize_btn = QPushButton(self)
+        resize_btn.setIcon(ui_icon("resize"))
+        resize_btn.setIconSize(QSize(14, 14))
         resize_btn.setFixedSize(btn_size, btn_size)
         resize_btn.move(rect.right() - btn_size + 1, rect.top() - btn_size - 2)
         resize_btn.setStyleSheet(btn_style)

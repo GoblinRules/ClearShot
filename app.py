@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from config import Config
 from overlay import SelectionOverlay
 from annotator import AnnotatorWindow
+from icon_utils import ui_icon
 from capture import capture_all_monitors, capture_region, get_monitor_list, ensure_dpi_awareness
 from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
@@ -229,9 +230,21 @@ class ClearShotApp:
             )
 
     def _create_app_icon(self) -> QIcon:
-        """Create the application icon using pre-rendered PNGs from the icon pack."""
+        """Create the application icon from bundled icon assets."""
         # Use _MEIPASS for PyInstaller bundled exe, otherwise use __file__ dir
         base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+
+        for candidate in [
+            "assets/icon.ico",
+            "assets/favicon.ico",
+            "resources/icon.ico",
+        ]:
+            icon_path = os.path.join(base, candidate)
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                if not icon.isNull():
+                    return icon
+
         icon = QIcon()
 
         # Try loading pre-rendered PNGs at exact sizes (pixel-perfect, no scaling needed)
@@ -316,51 +329,49 @@ class ClearShotApp:
         """)
 
         # Capture Region
-        region_action = QAction("📷 Capture Region", menu)
+        region_action = QAction(ui_icon("capture_region"), "Capture Region", menu)
         region_action.setToolTip("Select a region to capture")
         region_action.triggered.connect(self._start_region_capture)
         menu.addAction(region_action)
 
         # Capture Fullscreen — submenu with per-monitor options
-        fullscreen_menu = QMenu("🖥️ Capture Fullscreen", menu)
+        fullscreen_menu = menu.addMenu(ui_icon("fullscreen"), "Capture Fullscreen")
         fullscreen_menu.setStyleSheet(menu.styleSheet())
 
-        all_action = QAction("All Monitors", fullscreen_menu)
+        all_action = QAction(ui_icon("fullscreen"), "All Monitors", fullscreen_menu)
         all_action.triggered.connect(lambda: self._start_fullscreen_capture(-1))
         fullscreen_menu.addAction(all_action)
 
         monitors = get_monitor_list()
         for idx, mon_rect in enumerate(monitors):
             label = f"Monitor {idx + 1}  ({mon_rect.width()}×{mon_rect.height()})"
-            mon_action = QAction(label, fullscreen_menu)
+            mon_action = QAction(ui_icon("monitor"), label, fullscreen_menu)
             mon_action.triggered.connect(lambda checked, i=idx: self._start_fullscreen_capture(i))
             fullscreen_menu.addAction(mon_action)
-
-        menu.addMenu(fullscreen_menu)
 
         menu.addSeparator()
 
         # Open Save Folder
-        folder_action = QAction("📁 Open Save Folder", menu)
+        folder_action = QAction(ui_icon("folder"), "Open Save Folder", menu)
         folder_action.triggered.connect(self._open_save_folder)
         menu.addAction(folder_action)
 
         menu.addSeparator()
 
         # Settings
-        settings_action = QAction("⚙️ Settings", menu)
+        settings_action = QAction(ui_icon("settings"), "Settings", menu)
         settings_action.triggered.connect(self._open_settings)
         menu.addAction(settings_action)
 
         # Help / About
-        help_about_action = QAction("❓ Help / About", menu)
+        help_about_action = QAction(ui_icon("help"), "Help / About", menu)
         help_about_action.triggered.connect(self._open_settings)
         menu.addAction(help_about_action)
 
         menu.addSeparator()
 
         # Exit
-        exit_action = QAction("❌ Exit", menu)
+        exit_action = QAction(ui_icon("close"), "Exit", menu)
         exit_action.triggered.connect(self._quit)
         menu.addAction(exit_action)
 

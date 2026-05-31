@@ -1,6 +1,7 @@
 # Build artifacts
 build/
 dist/
+installer_output/*.exe
 *.spec.bak
 
 # Python

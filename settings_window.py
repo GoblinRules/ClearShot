@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 import webbrowser
 import winreg
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
 )
 from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS
+from icon_utils import ui_icon
 
 GITHUB_REPO = "GoblinRules/ClearShot"
 
@@ -347,7 +348,9 @@ class SettingsWindow(QDialog):
 
         # --- Check for Updates button ---
         update_layout = QHBoxLayout()
-        self._update_btn = QPushButton("🔄 Check for Updates")
+        self._update_btn = QPushButton("Check for Updates")
+        self._update_btn.setIcon(ui_icon("refresh"))
+        self._update_btn.setIconSize(QSize(16, 16))
         self._update_btn.setStyleSheet(
             "QPushButton { background: #0078D4; color: white; border: none; "
             "border-radius: 6px; padding: 10px 24px; font-weight: bold; font-size: 13px; }"
@@ -373,7 +376,7 @@ class SettingsWindow(QDialog):
         content_layout.setContentsMargins(12, 8, 12, 8)
 
         help_html = f"""
-        <h3 style="color: #0099FF;">🎯 Taking Screenshots</h3>
+        <h3 style="color: #0099FF;">Taking Screenshots</h3>
         <table cellpadding="6" style="margin-left: 8px;">
           <tr><td style="color: #ccc;"><b>Region Capture</b></td>
               <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Print Screen</code></td></tr>
@@ -382,33 +385,33 @@ class SettingsWindow(QDialog):
         </table>
         <p style="color: #aaa; margin-left: 8px;">You can also right-click the tray icon to capture.</p>
 
-        <h3 style="color: #0099FF;">📷 Region Capture</h3>
+        <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
           <li>Press <b>Print Screen</b> (or your custom hotkey)</li>
           <li>Click and drag to select an area</li>
           <li>Release to see options:<br>
-            &nbsp;&nbsp;📋 <b>Copy</b> — Copy to clipboard<br>
-            &nbsp;&nbsp;💾 <b>Save</b> — Save with file dialog<br>
-            &nbsp;&nbsp;⚡ <b>Quick Save</b> — Save to your default folder<br>
-            &nbsp;&nbsp;✏️ <b>Edit</b> — Open annotation editor<br>
-            &nbsp;&nbsp;✕ <b>Cancel</b> — Discard</li>
+            &nbsp;&nbsp;<b>Copy</b> — Copy to clipboard<br>
+            &nbsp;&nbsp;<b>Save</b> — Save with file dialog<br>
+            &nbsp;&nbsp;<b>Quick Save</b> — Save to your default folder<br>
+            &nbsp;&nbsp;<b>Edit</b> — Open annotation editor<br>
+            &nbsp;&nbsp;<b>Cancel</b> — Discard</li>
         </ol>
 
-        <h3 style="color: #0099FF;">✏️ Annotation Tools</h3>
+        <h3 style="color: #0099FF;">Annotation Tools</h3>
         <table cellpadding="4" style="margin-left: 8px;">
-          <tr><td style="color: #ccc;">✏️ <b>Pen</b></td><td style="color: #aaa;">Freehand drawing</td></tr>
-          <tr><td style="color: #ccc;">─ <b>Line</b></td><td style="color: #aaa;">Straight lines</td></tr>
-          <tr><td style="color: #ccc;">→ <b>Arrow</b></td><td style="color: #aaa;">Arrows with heads</td></tr>
-          <tr><td style="color: #ccc;">□ <b>Rectangle</b></td><td style="color: #aaa;">Outlined rectangles</td></tr>
-          <tr><td style="color: #ccc;">■ <b>Filled Rect</b></td><td style="color: #aaa;">Solid rectangles</td></tr>
-          <tr><td style="color: #ccc;">○ <b>Ellipse</b></td><td style="color: #aaa;">Circles and ovals</td></tr>
+          <tr><td style="color: #ccc;"><b>Pen</b></td><td style="color: #aaa;">Freehand drawing</td></tr>
+          <tr><td style="color: #ccc;"><b>Line</b></td><td style="color: #aaa;">Straight lines</td></tr>
+          <tr><td style="color: #ccc;"><b>Arrow</b></td><td style="color: #aaa;">Arrows with heads</td></tr>
+          <tr><td style="color: #ccc;"><b>Rectangle</b></td><td style="color: #aaa;">Outlined rectangles</td></tr>
+          <tr><td style="color: #ccc;"><b>Filled Rect</b></td><td style="color: #aaa;">Solid rectangles</td></tr>
+          <tr><td style="color: #ccc;"><b>Ellipse</b></td><td style="color: #aaa;">Circles and ovals</td></tr>
           <tr><td style="color: #ccc;">T <b>Text</b></td><td style="color: #aaa;">Click to type text</td></tr>
-          <tr><td style="color: #ccc;">▪ <b>Blur</b></td><td style="color: #aaa;">Blur sensitive areas</td></tr>
+          <tr><td style="color: #ccc;"><b>Blur</b></td><td style="color: #aaa;">Blur sensitive areas</td></tr>
           <tr><td style="color: #ccc;"># <b>Counter</b></td><td style="color: #aaa;">Numbered markers (1, 2, 3…)</td></tr>
         </table>
         <p style="color: #aaa; margin-left: 8px;">Use the color palette and size slider to customize.</p>
 
-        <h3 style="color: #0099FF;">💡 Tips</h3>
+        <h3 style="color: #0099FF;">Tips</h3>
         <ul style="color: #ccc; margin-left: 8px;">
           <li>Double-click the tray icon to start a region capture</li>
           <li>Use <code style="background: #333; padding: 1px 6px; border-radius: 3px;">Esc</code> to cancel a capture</li>
@@ -430,7 +433,7 @@ class SettingsWindow(QDialog):
     def _check_for_updates(self):
         """Check GitHub releases for a newer version."""
         self._update_btn.setEnabled(False)
-        self._update_btn.setText("⏳ Checking...")
+        self._update_btn.setText("Checking...")
 
         def _do_check():
             try:
@@ -464,7 +467,7 @@ class SettingsWindow(QDialog):
 
         def _show_result(latest: str, url: str):
             self._update_btn.setEnabled(True)
-            self._update_btn.setText("🔄 Check for Updates")
+            self._update_btn.setText("Check for Updates")
             current = APP_VERSION.lstrip("vV")
             if not latest:
                 _show_error("Could not determine the latest version.")
@@ -473,7 +476,7 @@ class SettingsWindow(QDialog):
                 reply = QMessageBox.information(
                     self,
                     "Update Available",
-                    f"<h3>🎉 A new version is available!</h3>"
+                    f"<h3>A new version is available</h3>"
                     f"<p>Current: <b>v{current}</b><br>"
                     f"Latest: <b>v{latest}</b></p>"
                     f"<p>Visit the releases page to download the update.</p>",
@@ -486,13 +489,13 @@ class SettingsWindow(QDialog):
                 QMessageBox.information(
                     self,
                     "Up to Date",
-                    f"<h3>✅ You're up to date!</h3>"
+                    f"<h3>You're up to date</h3>"
                     f"<p><b>v{current}</b> is the latest version.</p>",
                 )
 
         def _show_error(msg: str):
             self._update_btn.setEnabled(True)
-            self._update_btn.setText("🔄 Check for Updates")
+            self._update_btn.setText("Check for Updates")
             QMessageBox.warning(
                 self,
                 "Update Check Failed",
