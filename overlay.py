@@ -62,13 +62,14 @@ class SelectionOverlay(QWidget):
 
         # Inline toolbar state
         self._show_inline_toolbar = False
-        self._inline_tool = None  # None, 'pen', 'line', 'arrow', 'rect', 'text', 'blur', 'highlight'
+        self._inline_tool = None  # None, 'pen', 'line', 'arrow', 'rect', 'ellipse', 'text', 'blur', 'highlight', 'counter'
         self._inline_items = []  # list of (type, color, width, ...data)
         self._inline_current = None  # item being drawn
         self._inline_drawing = False
         self._inline_start = QPoint()
         self._inline_color = '#FF0000'
         self._inline_width = 3
+        self._inline_counter_value = 1
 
         # Button rects (computed in paintEvent)
         self._tool_btn_rects = {}  # tool_name -> QRectF
@@ -99,6 +100,7 @@ class SelectionOverlay(QWidget):
         self._show_inline_toolbar = False
         self._inline_tool = None
         self._inline_items.clear()
+        self._inline_counter_value = 1
         self._show_magnifier = True
         self._hovered_tool = None
 
@@ -402,7 +404,7 @@ class SelectionOverlay(QWidget):
                         return
                     if tool_name == 'undo':
                         if self._inline_items:
-                            self._inline_items.pop()
+                            self._undo_inline_item()
                         self.update()
                         return
                     # Toggle other tools
@@ -418,6 +420,13 @@ class SelectionOverlay(QWidget):
 
             # If an inline tool is active and click is inside selection, start drawing
             if self._inline_tool and self._selection.normalized().contains(pos):
+                if self._inline_tool == 'counter':
+                    self._inline_items.append(
+                        ('counter', self._inline_color, self._inline_width, pos, self._inline_counter_value)
+                    )
+                    self._inline_counter_value += 1
+                    self.update()
+                    return
                 if self._inline_tool == 'text':
                     # Text tool uses drag-a-box, same as rect/line/etc.
                     pass  # fall through to normal drag start below
@@ -515,6 +524,8 @@ class SelectionOverlay(QWidget):
                         # text: (type, color, font_size, QRect, text_str)
                         r = item[3]
                         moved_items.append((t, item[1], item[2], QRect(r.topLeft() + delta, r.size()), item[4]))
+                    elif t == 'counter':
+                        moved_items.append((t, item[1], item[2], item[3] + delta, item[4]))
                     else:
                         moved_items.append((t, item[1], item[2], item[3] + delta, item[4] + delta))
                 self._inline_items = moved_items
@@ -603,6 +614,7 @@ class SelectionOverlay(QWidget):
                 self._show_inline_toolbar = False
                 self._inline_tool = None
                 self._inline_items.clear()
+                self._inline_counter_value = 1
                 self._show_magnifier = True
                 self.setCursor(Qt.CursorShape.CrossCursor)
                 self.update()
@@ -621,7 +633,7 @@ class SelectionOverlay(QWidget):
                 self._handle_inline_action('save')
         elif key == Qt.Key.Key_Z and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if self._show_inline_toolbar and self._inline_items:
-                self._inline_items.pop()
+                self._undo_inline_item()
                 self.update()
         elif key == Qt.Key.Key_A and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             # Select all
@@ -661,9 +673,11 @@ class SelectionOverlay(QWidget):
             'line',
             'arrow',
             'rect',
+            'ellipse',
             'text',
             'blur',
             'highlight',
+            'counter',
             'undo',
             'color',
         ]
@@ -682,8 +696,8 @@ class SelectionOverlay(QWidget):
         # Tool name → tooltip label
         tool_labels = {
             'pen': 'Pen', 'line': 'Line', 'arrow': 'Arrow',
-            'rect': 'Rectangle', 'text': 'Text', 'blur': 'Blur',
-            'highlight': 'Highlight', 'undo': 'Undo', 'color': 'Color',
+            'rect': 'Rectangle', 'ellipse': 'Ellipse', 'text': 'Text', 'blur': 'Blur',
+            'highlight': 'Highlight', 'counter': 'Counter', 'undo': 'Undo', 'color': 'Color',
         }
 
         for i, tool_name in enumerate(tools):
@@ -711,7 +725,7 @@ class SelectionOverlay(QWidget):
                 painter.setBrush(QBrush(QColor(self._inline_color)))
                 painter.drawRoundedRect(swatch, 2, 2)
             else:
-                paint_icon(painter, tool_name, btn_rect, QColor(255, 255, 255))
+                paint_icon(painter, tool_name, btn_rect, QColor(255, 255, 255), QColor(self._inline_color))
 
         # ── Tooltip for hovered tool ──
         if self._hovered_tool and self._hovered_tool in tool_labels:
@@ -846,6 +860,13 @@ class SelectionOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(QRectF(QPointF(start), QPointF(end)).normalized())
 
+        elif item_type == 'ellipse':
+            start, end = item[3] - offset, item[4] - offset
+            pen = QPen(color, width, Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QRectF(QPointF(start), QPointF(end)).normalized())
+
         elif item_type == 'highlight':
             start, end = item[3] - offset, item[4] - offset
             hc = QColor(color)
@@ -853,6 +874,21 @@ class SelectionOverlay(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(hc))
             painter.drawRect(QRectF(QPointF(start), QPointF(end)).normalized())
+
+        elif item_type == 'counter':
+            pos = item[3] - offset
+            number = item[4]
+            radius = max(13, width * 5)
+            painter.setPen(QPen(QColor("#ffffff"), max(1, width // 2)))
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(QPointF(pos), radius, radius)
+
+            font = QFont("Segoe UI", int(radius * 0.9))
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(QPen(QColor("#ffffff")))
+            text_rect = QRectF(pos.x() - radius, pos.y() - radius, radius * 2, radius * 2)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, str(number))
 
         elif item_type == 'text':
             text_rect = item[3]  # QRect
@@ -909,6 +945,12 @@ class SelectionOverlay(QWidget):
                     painter.drawImage(rect, pixelated)
 
     # ── Special inline tool helpers ──────────────────────────────────
+
+    def _undo_inline_item(self):
+        """Undo the most recent inline annotation and keep marker numbering intuitive."""
+        item = self._inline_items.pop()
+        if item[0] == 'counter':
+            self._inline_counter_value = max(1, item[4])
 
     def _pick_inline_color(self):
         """Open a color picker dialog."""
