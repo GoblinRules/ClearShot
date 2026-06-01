@@ -4,7 +4,7 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox,
@@ -306,7 +306,6 @@ class ClearShotApp:
     def _build_tray_menu(self):
         """Build the system tray context menu."""
         menu = QMenu()
-        menu.setIconSize(QSize(18, 18))
         menu.setStyleSheet("""
             QMenu {
                 background: #2b2b2b;
@@ -337,7 +336,6 @@ class ClearShotApp:
 
         # Capture Fullscreen — submenu with per-monitor options
         fullscreen_menu = menu.addMenu(ui_icon("fullscreen"), "Capture Fullscreen")
-        fullscreen_menu.setIconSize(QSize(18, 18))
         fullscreen_menu.setStyleSheet(menu.styleSheet())
 
         all_action = QAction(ui_icon("fullscreen"), "All Monitors", fullscreen_menu)

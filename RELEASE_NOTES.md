@@ -1,20 +1,21 @@
-# ClearShot v1.0.6
+# ClearShot v1.0.7
 
-## Improvements
+## Fix
 
-- Refined the shared vector icon set with larger strokes, tighter geometry, and clearer tray/menu glyphs.
-- Added missing quick annotation tools after region capture:
-  - Ellipse
-  - Counter / numbered marker
-- Counter markers now place with a single click, render into copied/saved screenshots, move with the selection, and keep numbering sensible after undo.
-- Increased tray menu icon size for better legibility.
+- Fixed a startup crash in `v1.0.6` caused by calling `setIconSize` on `QMenu`, which is not available in this PyQt6 build.
+
+## Included From v1.0.6
+
+- Refined vector icons.
+- Added the missing quick toolbar ellipse and counter / numbered marker tools.
+- Counter markers click-place, render into copy/save, move with selection, and undo cleanly.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.0.6.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.0.7.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 
