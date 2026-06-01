@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 import webbrowser
 import winreg
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
@@ -115,6 +115,8 @@ class SettingsWindow(QDialog):
     """Application settings dialog with tabs."""
 
     settings_changed = pyqtSignal()
+    update_check_finished = pyqtSignal(str, str)
+    update_check_failed = pyqtSignal(str)
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -213,6 +215,8 @@ class SettingsWindow(QDialog):
 
         self._build_ui()
         self._load_values()
+        self.update_check_finished.connect(self._show_update_result)
+        self.update_check_failed.connect(self._show_update_error)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -455,55 +459,57 @@ class SettingsWindow(QDialog):
                 resp.close()
                 latest_tag = data.get("tag_name", "").lstrip("vV")
                 html_url = data.get("html_url", "")
-                QTimer.singleShot(0, lambda: _show_result(latest_tag, html_url))
-            except Exception as e:
-                QTimer.singleShot(0, lambda: _show_error(str(e)))
-
-        def _version_tuple(v: str):
-            try:
-                return tuple(int(x) for x in v.split("."))
-            except ValueError:
-                return (0, 0, 0)
-
-        def _show_result(latest: str, url: str):
-            self._update_btn.setEnabled(True)
-            self._update_btn.setText("Check for Updates")
-            current = APP_VERSION.lstrip("vV")
-            if not latest:
-                _show_error("Could not determine the latest version.")
-                return
-            if _version_tuple(latest) > _version_tuple(current):
-                reply = QMessageBox.information(
-                    self,
-                    "Update Available",
-                    f"<h3>A new version is available</h3>"
-                    f"<p>Current: <b>v{current}</b><br>"
-                    f"Latest: <b>v{latest}</b></p>"
-                    f"<p>Visit the releases page to download the update.</p>",
-                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Close,
-                    QMessageBox.StandardButton.Open,
-                )
-                if reply == QMessageBox.StandardButton.Open:
-                    webbrowser.open(url or f"https://github.com/{GITHUB_REPO}/releases")
-            else:
-                QMessageBox.information(
-                    self,
-                    "Up to Date",
-                    f"<h3>You're up to date</h3>"
-                    f"<p><b>v{current}</b> is the latest version.</p>",
-                )
-
-        def _show_error(msg: str):
-            self._update_btn.setEnabled(True)
-            self._update_btn.setText("Check for Updates")
-            QMessageBox.warning(
-                self,
-                "Update Check Failed",
-                f"<p>Could not check for updates.</p>"
-                f"<p style='color: gray;'>{msg}</p>",
-            )
+                self.update_check_finished.emit(latest_tag, html_url)
+            except Exception as exc:
+                self.update_check_failed.emit(str(exc))
 
         threading.Thread(target=_do_check, daemon=True).start()
+
+    def _version_tuple(self, version: str):
+        try:
+            return tuple(int(part) for part in version.split("."))
+        except ValueError:
+            return (0, 0, 0)
+
+    def _reset_update_button(self):
+        self._update_btn.setEnabled(True)
+        self._update_btn.setText("Check for Updates")
+
+    def _show_update_result(self, latest: str, url: str):
+        self._reset_update_button()
+        current = APP_VERSION.lstrip("vV")
+        if not latest:
+            self._show_update_error("Could not determine the latest version.")
+            return
+        if self._version_tuple(latest) > self._version_tuple(current):
+            reply = QMessageBox.information(
+                self,
+                "Update Available",
+                f"<h3>A new version is available</h3>"
+                f"<p>Current: <b>v{current}</b><br>"
+                f"Latest: <b>v{latest}</b></p>"
+                f"<p>Visit the releases page to download the update.</p>",
+                QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Close,
+                QMessageBox.StandardButton.Open,
+            )
+            if reply == QMessageBox.StandardButton.Open:
+                webbrowser.open(url or f"https://github.com/{GITHUB_REPO}/releases")
+        else:
+            QMessageBox.information(
+                self,
+                "Up to Date",
+                f"<h3>You're up to date</h3>"
+                f"<p><b>v{current}</b> is the latest version.</p>",
+            )
+
+    def _show_update_error(self, msg: str):
+        self._reset_update_button()
+        QMessageBox.warning(
+            self,
+            "Update Check Failed",
+            f"<p>Could not check for updates.</p>"
+            f"<p style='color: gray;'>{msg}</p>",
+        )
 
     def _load_values(self):
         """Load current config values into the UI."""
