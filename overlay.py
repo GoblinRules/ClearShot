@@ -751,7 +751,7 @@ class SelectionOverlay(QWidget):
         actions = [
             ('copy', 'Copy', QColor(0, 120, 212), 'copy'),
             ('save', 'Save', QColor(16, 124, 16), 'save'),
-            ('edit', 'Edit', QColor(80, 80, 80), 'pen'),
+            ('edit', 'Edit', QColor(80, 80, 80), 'editor'),
             ('close', '', QColor(100, 40, 40), 'close'),
         ]
 
