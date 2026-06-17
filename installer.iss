@@ -1,7 +1,7 @@
 ; ClearShot Installer Script for Inno Setup
 
 #define MyAppName "ClearShot"
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.0.10"
 #define MyAppPublisher "GoblinRules"
 #define MyAppURL "https://github.com/GoblinRules/ClearShot"
 #define MyAppExeName "ClearShot.exe"
@@ -40,6 +40,7 @@ Name: "startupicon"; Description: "Start {#MyAppName} when Windows starts"; Grou
 
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

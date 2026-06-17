@@ -2,137 +2,176 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QByteArray, QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import (
-    QColor,
-    QBrush,
-    QFont,
-    QIcon,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPixmap,
-)
+from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
+from PyQt6.QtGui import QColor, QBrush, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 
-SVG_PATHS = {
-    "pen": """
-        <path d="M12 20h9"/>
-        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-        <path d="m14 6 4 4"/>
-    """,
-    "line": """<path d="M5 12h14"/>""",
-    "arrow": """
-        <path d="M7 17 17 7"/>
-        <path d="M8 7h9v9"/>
-    """,
-    "rect": """<rect x="5" y="5" width="14" height="14" rx="2.5"/>""",
-    "ellipse": """<ellipse cx="12" cy="12" rx="7.5" ry="6.5"/>""",
-    "text": """
-        <path d="M4 7V4h16v3"/>
-        <path d="M9 20h6"/>
-        <path d="M12 4v16"/>
-    """,
-    "palette": """
-        <path d="M12 3a9 9 0 0 0 0 18h1.5a1.5 1.5 0 0 0 1.1-2.5 1.5 1.5 0 0 1 1.1-2.5H18a6 6 0 0 0 0-12z"/>
-        <circle cx="7.5" cy="10" r=".8"/>
-        <circle cx="10.5" cy="7.5" r=".8"/>
-        <circle cx="14" cy="7.5" r=".8"/>
-        <circle cx="16.5" cy="10.5" r=".8"/>
-    """,
-    "undo": """
-        <path d="M9 14 4 9l5-5"/>
-        <path d="M4 9h10.5a5.5 5.5 0 1 1 0 11H11"/>
-    """,
-    "redo": """
-        <path d="m15 14 5-5-5-5"/>
-        <path d="M20 9H9.5a5.5 5.5 0 1 0 0 11H13"/>
-    """,
-    "trash": """
-        <path d="M3 6h18"/>
-        <path d="M8 6V4h8v2"/>
-        <path d="M19 6 18 20H6L5 6"/>
-        <path d="M10 11v5"/>
-        <path d="M14 11v5"/>
-    """,
-    "copy": """
-        <rect x="8" y="8" width="12" height="12" rx="2"/>
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
-    """,
-    "save": """
-        <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5z"/>
-        <path d="M15 3v5H7V3"/>
-        <path d="M7 21v-7h10v7"/>
-    """,
-    "quick_save": """<path d="M13 2 4 14h7l-1 8 10-13h-7z"/>""",
-    "capture_region": """
-        <path d="M4 8V5a1 1 0 0 1 1-1h3"/>
-        <path d="M16 4h3a1 1 0 0 1 1 1v3"/>
-        <path d="M20 16v3a1 1 0 0 1-1 1h-3"/>
-        <path d="M8 20H5a1 1 0 0 1-1-1v-3"/>
-        <path d="M9 12h6"/>
-        <path d="M12 9v6"/>
-    """,
-    "fullscreen": """
-        <rect x="4" y="5" width="16" height="11" rx="2"/>
-        <path d="M8 20h8"/>
-        <path d="M12 16v4"/>
-    """,
-    "folder": """
-        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1"/>
-        <path d="M3 10h18l-2 9H5z"/>
-    """,
-    "settings": """
-        <path d="M4 7h10"/>
-        <path d="M18 7h2"/>
-        <path d="M4 17h2"/>
-        <path d="M10 17h10"/>
-        <circle cx="16" cy="7" r="2"/>
-        <circle cx="8" cy="17" r="2"/>
-    """,
-    "help": """
-        <circle cx="12" cy="12" r="9"/>
-        <path d="M9.5 9a2.7 2.7 0 0 1 5.1 1.3c0 1.9-2.6 2.1-2.6 4"/>
-        <path d="M12 18h.01"/>
-    """,
-    "refresh": """
-        <path d="M20 6v5h-5"/>
-        <path d="M4 18v-5h5"/>
-        <path d="M18.8 10A7 7 0 0 0 6.3 7.3L4 9.5"/>
-        <path d="M5.2 14a7 7 0 0 0 12.5 2.7L20 14.5"/>
-    """,
-    "check": """<path d="m5 12 4 4 10-10"/>""",
-    "close": """
-        <path d="M6 6l12 12"/>
-        <path d="M18 6 6 18"/>
-    """,
-    "move": """
-        <path d="M12 3v18"/>
-        <path d="m8 7 4-4 4 4"/>
-        <path d="m8 17 4 4 4-4"/>
-        <path d="M3 12h18"/>
-        <path d="m7 8-4 4 4 4"/>
-        <path d="m17 8 4 4-4 4"/>
-    """,
-    "resize": """
-        <path d="M15 3h6v6"/>
-        <path d="m21 3-7 7"/>
-        <path d="M9 21H3v-6"/>
-        <path d="m3 21 7-7"/>
-    """,
-    "edit": """
-        <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L11 15l-4 1 1-4Z"/>
-        <path d="m15 5 4 4"/>
-    """,
-    "editor": """
-        <rect x="3.5" y="5" width="17" height="14" rx="2"/>
-        <path d="M3.5 9h17"/>
-        <path d="m6.5 17 3.5-4 3 3 2-2 2.5 3"/>
-        <path d="M7.5 7h.01"/>
-        <path d="M10.5 7h.01"/>
-    """,
+# Selected path data from Pictogrammers Material Design Icons v7.4.47.
+# Source package: @mdi/js, licensed under Apache-2.0.
+MDI_PATHS = {
+    "pen": (
+        "M9.75 20.85C11.53 20.15 11.14 18.22 10.24 17C9.35 15.75 8.12 14.89 "
+        "6.88 14.06C6 13.5 5.19 12.8 4.54 12C4.26 11.67 3.69 11.06 4.27 "
+        "10.94C4.86 10.82 5.88 11.4 6.4 11.62C7.31 12 8.21 12.44 9.05 "
+        "12.96L10.06 11.26C8.5 10.23 6.5 9.32 4.64 9.05C3.58 8.89 2.46 "
+        "9.11 2.1 10.26C1.78 11.25 2.29 12.25 2.87 13.03C4.24 14.86 6.37 "
+        "15.74 7.96 17.32C8.3 17.65 8.71 18.04 8.91 18.5C9.12 18.94 "
+        "9.07 18.97 8.6 18.97C7.36 18.97 5.81 18 4.8 17.36L3.79 "
+        "19.06C5.32 20 7.88 21.47 9.75 20.85M18.96 7.33L13.29 13H11V10.71L16.67 "
+        "5.03L18.96 7.33M22.36 6.55C22.35 6.85 22.04 7.16 21.72 7.47L19.2 "
+        "10L18.33 9.13L20.93 6.54L20.34 5.95L19.67 6.62L17.38 4.33L19.53 "
+        "2.18C19.77 1.94 20.16 1.94 20.39 2.18L21.82 3.61C22.06 3.83 22.06 "
+        "4.23 21.82 4.47C21.61 4.68 21.41 4.88 21.41 5.08C21.39 5.28 "
+        "21.59 5.5 21.79 5.67C22.08 5.97 22.37 6.25 22.36 6.55Z"
+    ),
+    "line": "M15,3V7.59L7.59,15H3V21H9V16.42L16.42,9H21V3M17,5H19V7H17M5,17H7V19H5",
+    "arrow": "M8.5,18.31L5.69,15.5L12.06,9.12H7.11V5.69H18.31V16.89H14.89V11.94L8.5,18.31Z",
+    "rect": "M4,6V19H20V6H4M18,17H6V8H18V17Z",
+    "ellipse": (
+        "M12,6C16.41,6 20,8.69 20,12C20,15.31 16.41,18 12,18C7.59,18 "
+        "4,15.31 4,12C4,8.69 7.59,6 12,6M12,4C6.5,4 2,7.58 2,12C2,16.42 "
+        "6.5,20 12,20C17.5,20 22,16.42 22,12C22,7.58 17.5,4 12,4Z"
+    ),
+    "text": (
+        "M18.5,4L19.66,8.35L18.7,8.61C18.25,7.74 17.79,6.87 17.26,6.43C16.73,6 "
+        "16.11,6 15.5,6H13V16.5C13,17 13,17.5 13.33,17.75C13.67,18 14.33,18 "
+        "15,18V19H9V18C9.67,18 10.33,18 10.67,17.75C11,17.5 11,17 "
+        "11,16.5V6H8.5C7.89,6 7.27,6 6.74,6.43C6.21,6.87 5.75,7.74 "
+        "5.3,8.61L4.34,8.35L5.5,4H18.5Z"
+    ),
+    "blur": (
+        "M14,8.5A1.5,1.5 0 0,0 12.5,10A1.5,1.5 0 0,0 14,11.5A1.5,1.5 0 0,0 "
+        "15.5,10A1.5,1.5 0 0,0 14,8.5M14,12.5A1.5,1.5 0 0,0 12.5,14A1.5,1.5 "
+        "0 0,0 14,15.5A1.5,1.5 0 0,0 15.5,14A1.5,1.5 0 0,0 14,12.5M10,17A1,1 "
+        "0 0,0 9,18A1,1 0 0,0 10,19A1,1 0 0,0 11,18A1,1 0 0,0 10,17M10,8.5A1.5,1.5 "
+        "0 0,0 8.5,10A1.5,1.5 0 0,0 10,11.5A1.5,1.5 0 0,0 11.5,10A1.5,1.5 "
+        "0 0,0 10,8.5M14,20.5A0.5,0.5 0 0,0 13.5,21A0.5,0.5 0 0,0 14,21.5A0.5,0.5 "
+        "0 0,0 14.5,21A0.5,0.5 0 0,0 14,20.5M14,17A1,1 0 0,0 13,18A1,1 "
+        "0 0,0 14,19A1,1 0 0,0 15,18A1,1 0 0,0 14,17M21,13.5A0.5,0.5 "
+        "0 0,0 20.5,14A0.5,0.5 0 0,0 21,14.5A0.5,0.5 0 0,0 21.5,14A0.5,0.5 "
+        "0 0,0 21,13.5M18,5A1,1 0 0,0 17,6A1,1 0 0,0 18,7A1,1 0 0,0 "
+        "19,6A1,1 0 0,0 18,5M18,9A1,1 0 0,0 17,10A1,1 0 0,0 18,11A1,1 "
+        "0 0,0 19,10A1,1 0 0,0 18,9M18,17A1,1 0 0,0 17,18A1,1 0 0,0 "
+        "18,19A1,1 0 0,0 19,18A1,1 0 0,0 18,17M18,13A1,1 0 0,0 17,14A1,1 "
+        "0 0,0 18,15A1,1 0 0,0 19,14A1,1 0 0,0 18,13M10,12.5A1.5,1.5 "
+        "0 0,0 8.5,14A1.5,1.5 0 0,0 10,15.5A1.5,1.5 0 0,0 11.5,14A1.5,1.5 "
+        "0 0,0 10,12.5M10,7A1,1 0 0,0 11,6A1,1 0 0,0 10,5A1,1 0 0,0 "
+        "9,6A1,1 0 0,0 10,7M10,3.5A0.5,0.5 0 0,0 10.5,3A0.5,0.5 0 0,0 "
+        "10,2.5A0.5,0.5 0 0,0 9.5,3A0.5,0.5 0 0,0 10,3.5M10,20.5A0.5,0.5 "
+        "0 0,0 9.5,21A0.5,0.5 0 0,0 10,21.5A0.5,0.5 0 0,0 10.5,21A0.5,0.5 "
+        "0 0,0 10,20.5M3,13.5A0.5,0.5 0 0,0 2.5,14A0.5,0.5 0 0,0 3,14.5A0.5,0.5 "
+        "0 0,0 3.5,14A0.5,0.5 0 0,0 3,13.5M14,3.5A0.5,0.5 0 0,0 14.5,3A0.5,0.5 "
+        "0 0,0 14,2.5A0.5,0.5 0 0,0 13.5,3A0.5,0.5 0 0,0 14,3.5M14,7A1,1 "
+        "0 0,0 15,6A1,1 0 0,0 14,5A1,1 0 0,0 13,6A1,1 0 0,0 14,7M21,10.5A0.5,0.5 "
+        "0 0,0 21.5,10A0.5,0.5 0 0,0 21,9.5A0.5,0.5 0 0,0 20.5,10A0.5,0.5 "
+        "0 0,0 21,10.5M6,5A1,1 0 0,0 5,6A1,1 0 0,0 6,7A1,1 0 0,0 "
+        "7,6A1,1 0 0,0 6,5M3,9.5A0.5,0.5 0 0,0 2.5,10A0.5,0.5 0 0,0 "
+        "3,10.5A0.5,0.5 0 0,0 3.5,10A0.5,0.5 0 0,0 3,9.5M6,9A1,1 "
+        "0 0,0 5,10A1,1 0 0,0 6,11A1,1 0 0,0 7,10A1,1 0 0,0 6,9M6,17A1,1 "
+        "0 0,0 5,18A1,1 0 0,0 6,19A1,1 0 0,0 7,18A1,1 0 0,0 6,17M6,13A1,1 "
+        "0 0,0 5,14A1,1 0 0,0 6,15A1,1 0 0,0 7,14A1,1 0 0,0 6,13Z"
+    ),
+    "filled_rect": (
+        "M4,17L6.75,14.25L6.72,14.23C6.14,13.64 6.14,12.69 6.72,12.11L11.46,7.37L15.7,11.61L10.96,16.35C10.39,16.93 "
+        "9.46,16.93 8.87,16.37L8.24,17H4M15.91,2.91C16.5,2.33 17.45,2.33 18.03,2.91L20.16,5.03C20.74,5.62 "
+        "20.74,6.57 20.16,7.16L16.86,10.45L12.62,6.21L15.91,2.91Z"
+    ),
+    "counter": (
+        "M10,7H14V17H12V9H10V7M12,2A10,10 0 0,1 22,12A10,10 0 0,1 "
+        "12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 "
+        "4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4Z"
+    ),
+    "palette": (
+        "M12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2C17.5,2 22,6 22,11A6,6 "
+        "0 0,1 16,17H14.2C13.9,17 13.7,17.2 13.7,17.5C13.7,17.6 13.8,17.7 "
+        "13.8,17.8C14.2,18.3 14.4,18.9 14.4,19.5C14.5,20.9 13.4,22 "
+        "12,22M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C12.3,20 12.5,19.8 "
+        "12.5,19.5C12.5,19.3 12.4,19.2 12.4,19.1C12,18.6 11.8,18.1 "
+        "11.8,17.5C11.8,16.1 12.9,15 14.3,15H16A4,4 0 0,0 20,11C20,7.1 "
+        "16.4,4 12,4M6.5,10C7.3,10 8,10.7 8,11.5C8,12.3 7.3,13 6.5,13C5.7,13 "
+        "5,12.3 5,11.5C5,10.7 5.7,10 6.5,10M9.5,6C10.3,6 11,6.7 "
+        "11,7.5C11,8.3 10.3,9 9.5,9C8.7,9 8,8.3 8,7.5C8,6.7 8.7,6 "
+        "9.5,6M14.5,6C15.3,6 16,6.7 16,7.5C16,8.3 15.3,9 14.5,9C13.7,9 "
+        "13,8.3 13,7.5C13,6.7 13.7,6 14.5,6M17.5,10C18.3,10 19,10.7 "
+        "19,11.5C19,12.3 18.3,13 17.5,13C16.7,13 16,12.3 16,11.5C16,10.7 "
+        "16.7,10 17.5,10Z"
+    ),
+    "undo": (
+        "M13.5,7A6.5,6.5 0 0,1 20,13.5A6.5,6.5 0 0,1 13.5,20H10V18H13.5C16,18 "
+        "18,16 18,13.5C18,11 16,9 13.5,9H7.83L10.91,12.09L9.5,13.5L4,8L9.5,2.5L10.92,3.91L7.83,7H13.5M6,18H8V20H6V18Z"
+    ),
+    "redo": (
+        "M10.5,7A6.5,6.5 0 0,0 4,13.5A6.5,6.5 0 0,0 10.5,20H14V18H10.5C8,18 "
+        "6,16 6,13.5C6,11 8,9 10.5,9H16.17L13.09,12.09L14.5,13.5L20,8L14.5,2.5L13.08,3.91L16.17,7H10.5M18,18H16V20H18V18Z"
+    ),
+    "trash": "M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z",
+    "copy": "M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z",
+    "save": (
+        "M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 "
+        "21 20.1 21 19V7L17 3M19 19H5V5H16.17L19 7.83V19M12 12C10.34 12 "
+        "9 13.34 9 15S10.34 18 12 18 15 16.66 15 15 13.66 12 12 12M6 6H15V10H6V6Z"
+    ),
+    "quick_save": (
+        "M14 12.8C13.5 12.31 12.78 12 12 12C10.34 12 9 13.34 9 15C9 "
+        "16.31 9.84 17.41 11 17.82C11.07 15.67 12.27 13.8 14 12.8M11.09 "
+        "19H5V5H16.17L19 7.83V12.35C19.75 12.61 20.42 13 21 13.54V7L17 "
+        "3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H11.81C11.46 "
+        "20.39 11.21 19.72 11.09 19M6 10H15V6H6V10M15.75 21L13 18L14.16 "
+        "16.84L15.75 18.43L19.34 14.84L20.5 16.25L15.75 21"
+    ),
+    "capture_region": "M19,3H15V5H19V9H21V5C21,3.89 20.1,3 19,3M19,19H15V21H19A2,2 0 0,0 21,19V15H19M5,15H3V19A2,2 0 0,0 5,21H9V19H5M3,5V9H5V5H9V3H5A2,2 0 0,0 3,5Z",
+    "fullscreen": (
+        "M9,6H5V10H7V8H9M19,10H17V12H15V14H19M21,16H3V4H21M21,2H3C1.89,2 "
+        "1,2.89 1,4V16A2,2 0 0,0 3,18H10V20H8V22H16V20H14V18H21A2,2 "
+        "0 0,0 23,16V4C23,2.89 22.1,2 21,2"
+    ),
+    "monitor": "M21,16H3V4H21M21,2H3C1.89,2 1,2.89 1,4V16A2,2 0 0,0 3,18H10V20H8V22H16V20H14V18H21A2,2 0 0,0 23,16V4C23,2.89 22.1,2 21,2Z",
+    "folder": (
+        "M6.1,10L4,18V8H21A2,2 0 0,0 19,6H12L10,4H4A2,2 0 0,0 2,6V18A2,2 "
+        "0 0,0 4,20H19C19.9,20 20.7,19.4 20.9,18.5L23.2,10H6.1M19,18H6L7.6,12H20.6L19,18Z"
+    ),
+    "settings": (
+        "M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 "
+        "0 0,1 12,8M12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 "
+        "0 0,0 14,12A2,2 0 0,0 12,10M10,22C9.75,22 9.54,21.82 "
+        "9.5,21.58L9.13,18.93C8.5,18.68 7.96,18.34 7.44,17.94L4.95,18.95C4.73,19.03 "
+        "4.46,18.95 4.34,18.73L2.34,15.27C2.21,15.05 2.27,14.78 2.46,14.63L4.57,12.97L4.5,12L4.57,11L2.46,9.37C2.27,9.22 "
+        "2.21,8.95 2.34,8.73L4.34,5.27C4.46,5.05 4.73,4.96 4.95,5.05L7.44,6.05C7.96,5.66 8.5,5.32 9.13,5.07L9.5,2.42C9.54,2.18 "
+        "9.75,2 10,2H14C14.25,2 14.46,2.18 14.5,2.42L14.87,5.07C15.5,5.32 16.04,5.66 16.56,6.05L19.05,5.05C19.27,4.96 "
+        "19.54,5.05 19.66,5.27L21.66,8.73C21.79,8.95 21.73,9.22 21.54,9.37L19.43,11L19.5,12L19.43,13L21.54,14.63C21.73,14.78 "
+        "21.79,15.05 21.66,15.27L19.66,18.73C19.54,18.95 19.27,19.04 19.05,18.95L16.56,17.95C16.04,18.34 15.5,18.68 "
+        "14.87,18.93L14.5,21.58C14.46,21.82 14.25,22 14,22H10M11.25,4L10.88,6.61C9.68,6.86 8.62,7.5 "
+        "7.85,8.39L5.44,7.35L4.69,8.65L6.8,10.2C6.4,11.37 6.4,12.64 6.8,13.8L4.68,15.36L5.43,16.66L7.86,15.62C8.63,16.5 "
+        "9.68,17.14 10.87,17.38L11.24,20H12.76L13.13,17.39C14.32,17.14 15.37,16.5 16.14,15.62L18.57,16.66L19.32,15.36L17.2,13.81C17.6,12.64 "
+        "17.6,11.37 17.2,10.2L19.31,8.65L18.56,7.35L16.15,8.39C15.38,7.5 14.32,6.86 13.12,6.62L12.75,4H11.25Z"
+    ),
+    "help": (
+        "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 "
+        "0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 "
+        "7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,6A4,4 "
+        "0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 "
+        "11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z"
+    ),
+    "refresh": "M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z",
+    "check": "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z",
+    "close": "M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z",
+    "move": "M13,6V11H18V7.75L22.25,12L18,16.25V13H13V18H16.25L12,22.25L7.75,18H11V13H6V16.25L1.75,12L6,7.75V11H11V6H7.75L12,1.75L16.25,6H13Z",
+    "resize": "M22,22H20V20H22V22M22,18H20V16H22V18M18,22H16V20H18V22M18,18H16V16H18V18M14,22H12V20H14V22M22,14H20V12H22V14Z",
+    "edit": (
+        "M5,3C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19H5V5H12V3H5"
+        "M17.78,4C17.61,4 17.43,4.07 17.3,4.2L16.08,5.41L18.58,7.91L19.8,6.7C20.06,6.44 20.06,6 19.8,5.75L18.25,4.2C18.12,4.07 "
+        "17.95,4 17.78,4M15.37,6.12L8,13.5V16H10.5L17.87,8.62L15.37,6.12Z"
+    ),
+    "editor": (
+        "M22.7 14.3L21.7 15.3L19.7 13.3L20.7 12.3C20.8 12.2 20.9 12.1 "
+        "21.1 12.1C21.2 12.1 21.4 12.2 21.5 12.3L22.8 13.6C22.9 13.8 "
+        "22.9 14.1 22.7 14.3M13 19.9V22H15.1L21.2 15.9L19.2 13.9L13 "
+        "19.9M11.21 15.83L9.25 13.47L6.5 17H13.12L15.66 14.55L13.96 12.29L11.21 "
+        "15.83M11 19.9V19.05L11.05 19H5V5H19V11.31L21 9.38V5C21 3.9 "
+        "20.11 3 19 3H5C3.9 3 3 3.9 3 5V19C3 20.11 3.9 21 "
+        "5 21H11V19.9Z"
+    ),
 }
 
 
@@ -167,31 +206,21 @@ def paint_icon(
     """Paint one named icon inside rect."""
     name = _normalize_name(name)
     r = QRectF(rect).adjusted(
-        rect.width() * 0.12,
-        rect.height() * 0.12,
-        -rect.width() * 0.12,
-        -rect.height() * 0.12,
+        rect.width() * 0.08,
+        rect.height() * 0.08,
+        -rect.width() * 0.08,
+        -rect.height() * 0.08,
     )
-    stroke = max(1.7, min(r.width(), r.height()) * 0.12)
     fg = QColor(color)
     ac = QColor(accent)
 
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(fg, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
 
-    if name in SVG_PATHS:
-        _draw_svg_icon(painter, r, SVG_PATHS[name], fg, stroke)
-    elif name == "filled_rect":
-        _draw_highlight_icon(painter, r, fg, ac, stroke)
-    elif name == "blur":
-        _draw_blur(painter, r, fg)
-    elif name == "counter":
-        painter.setPen(QPen(fg, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.setBrush(QBrush(ac))
-        painter.drawEllipse(_box(r, 0.18, 0.16, 0.64, 0.68))
-        _draw_text_glyph(painter, r, "1", QColor("#ffffff"), 0.54)
+    if name == "filled_rect":
+        _draw_highlight_icon(painter, r, fg, ac)
+    elif name in MDI_PATHS:
+        _draw_mdi_icon(painter, r, MDI_PATHS[name], fg)
     else:
         _draw_text_glyph(painter, r, name[:1].upper() or "?", fg, 0.62)
 
@@ -202,17 +231,13 @@ def _normalize_name(name: str) -> str:
     aliases = {
         "highlight": "filled_rect",
         "filled": "filled_rect",
-        "monitor": "fullscreen",
+        "monitor": "monitor",
         "open_folder": "folder",
         "exit": "close",
         "color": "palette",
     }
     key = name.lower().strip().replace("-", "_").replace(" ", "_")
     return aliases.get(key, key)
-
-
-def _pt(rect: QRectF, x: float, y: float) -> QPointF:
-    return QPointF(rect.left() + rect.width() * x, rect.top() + rect.height() * y)
 
 
 def _box(rect: QRectF, x: float, y: float, w: float, h: float) -> QRectF:
@@ -224,191 +249,33 @@ def _box(rect: QRectF, x: float, y: float, w: float, h: float) -> QRectF:
     )
 
 
-def _draw_svg_icon(painter: QPainter, rect: QRectF, body: str, color: QColor, stroke: float) -> None:
+def _draw_mdi_icon(painter: QPainter, rect: QRectF, path_data: str, color: QColor) -> None:
+    opacity = max(0.0, min(1.0, color.alphaF()))
     svg = f"""
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-      <g fill="none" stroke="{color.name()}" stroke-width="2.1"
-         stroke-linecap="round" stroke-linejoin="round">
-        {body}
-      </g>
+      <path fill="{color.name()}" fill-opacity="{opacity:.3f}" d="{path_data}"/>
     </svg>
     """
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     renderer.render(painter, rect)
 
 
-def _draw_highlight_icon(painter: QPainter, r: QRectF, color: QColor, accent: QColor, stroke: float) -> None:
-    body = """
-        <path d="M5 15 15 5l4 4-10 10H5z"/>
-        <path d="M14 6l4 4"/>
-        <path d="M5 19h14"/>
-    """
-    _draw_svg_icon(painter, r, body, color, stroke)
+def _draw_highlight_icon(painter: QPainter, rect: QRectF, color: QColor, accent: QColor) -> None:
+    _draw_mdi_icon(painter, rect, MDI_PATHS["filled_rect"], color)
+
     fill = QColor(accent)
-    fill.setAlpha(105)
+    fill.setAlpha(150)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(fill))
-    painter.drawRoundedRect(_box(r, 0.2, 0.68, 0.6, 0.12), stroke * 0.5, stroke * 0.5)
+    radius = max(1.5, min(rect.width(), rect.height()) * 0.08)
+    painter.drawRoundedRect(_box(rect, 0.18, 0.74, 0.64, 0.12), radius, radius)
 
 
-def _draw_text_glyph(painter: QPainter, r: QRectF, text: str, color: QColor, scale: float) -> None:
+def _draw_text_glyph(painter: QPainter, rect: QRectF, text: str, color: QColor, scale: float) -> None:
     painter.setPen(QPen(color))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     font = QFont("Segoe UI")
     font.setBold(True)
-    font.setPixelSize(max(8, int(min(r.width(), r.height()) * scale)))
+    font.setPixelSize(max(8, int(min(rect.width(), rect.height()) * scale)))
     painter.setFont(font)
-    painter.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
-
-
-def _draw_blur(painter: QPainter, r: QRectF, color: QColor) -> None:
-    painter.setPen(Qt.PenStyle.NoPen)
-    size = min(r.width(), r.height()) * 0.18
-    for row in range(3):
-        for col in range(3):
-            c = QColor(color)
-            c.setAlpha(220 if (row + col) % 2 == 0 else 120)
-            painter.setBrush(QBrush(c))
-            box = QRectF(
-                r.left() + r.width() * (0.18 + col * 0.23),
-                r.top() + r.height() * (0.18 + row * 0.23),
-                size,
-                size,
-            )
-            painter.drawRoundedRect(box, size * 0.18, size * 0.18)
-
-
-def _draw_palette(painter: QPainter, r: QRectF, color: QColor, accent: QColor) -> None:
-    painter.setPen(QPen(color, max(1.2, min(r.width(), r.height()) * 0.08)))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawEllipse(_box(r, 0.14, 0.18, 0.72, 0.62))
-    painter.setPen(Qt.PenStyle.NoPen)
-    for x, y, c in [
-        (0.34, 0.38, QColor("#ff4d4d")),
-        (0.5, 0.3, QColor("#ffd24d")),
-        (0.64, 0.42, accent),
-    ]:
-        painter.setBrush(QBrush(c))
-        painter.drawEllipse(_pt(r, x, y), r.width() * 0.055, r.height() * 0.055)
-    painter.setBrush(QBrush(color))
-    painter.drawEllipse(_pt(r, 0.56, 0.62), r.width() * 0.075, r.height() * 0.075)
-
-
-def _draw_turn_arrow(painter: QPainter, r: QRectF, color: QColor, stroke: float, reverse: bool) -> None:
-    if reverse:
-        path = QPainterPath(_pt(r, 0.78, 0.72))
-        path.cubicTo(_pt(r, 0.78, 0.38), _pt(r, 0.54, 0.26), _pt(r, 0.3, 0.38))
-        painter.drawPath(path)
-        painter.drawLine(_pt(r, 0.3, 0.38), _pt(r, 0.46, 0.2))
-        painter.drawLine(_pt(r, 0.3, 0.38), _pt(r, 0.5, 0.48))
-    else:
-        path = QPainterPath(_pt(r, 0.22, 0.72))
-        path.cubicTo(_pt(r, 0.22, 0.38), _pt(r, 0.46, 0.26), _pt(r, 0.7, 0.38))
-        painter.drawPath(path)
-        painter.drawLine(_pt(r, 0.7, 0.38), _pt(r, 0.54, 0.2))
-        painter.drawLine(_pt(r, 0.7, 0.38), _pt(r, 0.5, 0.48))
-
-
-def _draw_trash(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    painter.drawLine(_pt(r, 0.24, 0.3), _pt(r, 0.76, 0.3))
-    painter.drawLine(_pt(r, 0.4, 0.22), _pt(r, 0.6, 0.22))
-    painter.drawRoundedRect(_box(r, 0.32, 0.34, 0.36, 0.46), stroke, stroke)
-    painter.drawLine(_pt(r, 0.44, 0.43), _pt(r, 0.44, 0.7))
-    painter.drawLine(_pt(r, 0.56, 0.43), _pt(r, 0.56, 0.7))
-
-
-def _draw_copy(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    painter.setPen(QPen(color, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    painter.drawRoundedRect(_box(r, 0.22, 0.28, 0.42, 0.48), stroke, stroke)
-    painter.drawRoundedRect(_box(r, 0.36, 0.18, 0.42, 0.48), stroke, stroke)
-
-
-def _draw_save(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    painter.drawRoundedRect(_box(r, 0.2, 0.18, 0.6, 0.64), stroke, stroke)
-    painter.drawLine(_pt(r, 0.34, 0.18), _pt(r, 0.34, 0.42))
-    painter.drawLine(_pt(r, 0.34, 0.42), _pt(r, 0.66, 0.42))
-    painter.drawRoundedRect(_box(r, 0.34, 0.58, 0.32, 0.18), stroke * 0.6, stroke * 0.6)
-
-
-def _draw_bolt(painter: QPainter, r: QRectF, color: QColor) -> None:
-    path = QPainterPath(_pt(r, 0.54, 0.12))
-    path.lineTo(_pt(r, 0.28, 0.54))
-    path.lineTo(_pt(r, 0.48, 0.54))
-    path.lineTo(_pt(r, 0.38, 0.88))
-    path.lineTo(_pt(r, 0.74, 0.42))
-    path.lineTo(_pt(r, 0.52, 0.42))
-    path.closeSubpath()
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(color))
-    painter.drawPath(path)
-
-
-def _draw_crop_corners(painter: QPainter, r: QRectF) -> None:
-    for x1, y1, x2, y2 in [
-        (0.12, 0.38, 0.12, 0.12), (0.12, 0.12, 0.38, 0.12),
-        (0.62, 0.12, 0.88, 0.12), (0.88, 0.12, 0.88, 0.38),
-        (0.88, 0.62, 0.88, 0.88), (0.88, 0.88, 0.62, 0.88),
-        (0.38, 0.88, 0.12, 0.88), (0.12, 0.88, 0.12, 0.62),
-    ]:
-        painter.drawLine(_pt(r, x1, y1), _pt(r, x2, y2))
-
-
-def _draw_monitor(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    painter.drawRoundedRect(_box(r, 0.14, 0.2, 0.72, 0.48), stroke, stroke)
-    painter.drawLine(_pt(r, 0.5, 0.68), _pt(r, 0.5, 0.8))
-    painter.drawLine(_pt(r, 0.36, 0.82), _pt(r, 0.64, 0.82))
-
-
-def _draw_folder(painter: QPainter, r: QRectF, color: QColor, accent: QColor, stroke: float) -> None:
-    fill = QColor(accent)
-    fill.setAlpha(70)
-    path = QPainterPath(_pt(r, 0.14, 0.32))
-    path.lineTo(_pt(r, 0.4, 0.32))
-    path.lineTo(_pt(r, 0.48, 0.42))
-    path.lineTo(_pt(r, 0.86, 0.42))
-    path.lineTo(_pt(r, 0.78, 0.8))
-    path.lineTo(_pt(r, 0.16, 0.8))
-    path.closeSubpath()
-    painter.setPen(QPen(color, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    painter.setBrush(QBrush(fill))
-    painter.drawPath(path)
-
-
-def _draw_sliders(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    knob_r = max(2.0, min(r.width(), r.height()) * 0.09)
-    rows = [(0.28, 0.34), (0.5, 0.66), (0.72, 0.46)]
-    for y, knob_x in rows:
-        painter.drawLine(_pt(r, 0.16, y), _pt(r, 0.84, y))
-        painter.setBrush(QBrush(color))
-        painter.drawEllipse(_pt(r, knob_x, y), knob_r, knob_r)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-
-def _draw_refresh(painter: QPainter, r: QRectF, color: QColor, stroke: float) -> None:
-    path = QPainterPath(_pt(r, 0.74, 0.32))
-    path.cubicTo(_pt(r, 0.58, 0.16), _pt(r, 0.28, 0.22), _pt(r, 0.24, 0.5))
-    path.cubicTo(_pt(r, 0.2, 0.78), _pt(r, 0.56, 0.88), _pt(r, 0.74, 0.66))
-    painter.drawPath(path)
-    painter.drawLine(_pt(r, 0.74, 0.32), _pt(r, 0.74, 0.14))
-    painter.drawLine(_pt(r, 0.74, 0.32), _pt(r, 0.56, 0.32))
-
-
-def _draw_move(painter: QPainter, r: QRectF) -> None:
-    painter.drawLine(_pt(r, 0.5, 0.18), _pt(r, 0.5, 0.82))
-    painter.drawLine(_pt(r, 0.18, 0.5), _pt(r, 0.82, 0.5))
-    painter.drawLine(_pt(r, 0.5, 0.18), _pt(r, 0.38, 0.3))
-    painter.drawLine(_pt(r, 0.5, 0.18), _pt(r, 0.62, 0.3))
-    painter.drawLine(_pt(r, 0.5, 0.82), _pt(r, 0.38, 0.7))
-    painter.drawLine(_pt(r, 0.5, 0.82), _pt(r, 0.62, 0.7))
-    painter.drawLine(_pt(r, 0.18, 0.5), _pt(r, 0.3, 0.38))
-    painter.drawLine(_pt(r, 0.18, 0.5), _pt(r, 0.3, 0.62))
-    painter.drawLine(_pt(r, 0.82, 0.5), _pt(r, 0.7, 0.38))
-    painter.drawLine(_pt(r, 0.82, 0.5), _pt(r, 0.7, 0.62))
-
-
-def _draw_resize(painter: QPainter, r: QRectF) -> None:
-    painter.drawLine(_pt(r, 0.28, 0.72), _pt(r, 0.72, 0.28))
-    painter.drawLine(_pt(r, 0.72, 0.28), _pt(r, 0.72, 0.46))
-    painter.drawLine(_pt(r, 0.72, 0.28), _pt(r, 0.54, 0.28))
-    painter.drawLine(_pt(r, 0.28, 0.72), _pt(r, 0.28, 0.54))
-    painter.drawLine(_pt(r, 0.28, 0.72), _pt(r, 0.46, 0.72))
+    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)

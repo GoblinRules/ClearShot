@@ -341,6 +341,7 @@ class SettingsWindow(QDialog):
             f"• Copy to clipboard or save to file<br>"
             f"• Global hotkeys</p>"
             f"<p><a href='https://github.com/{GITHUB_REPO}' style='color: #0099FF;'>GitHub</a></p>"
+            f"<p style='color: gray;'>Interface icons use Material Design Icons by Pictogrammers (Apache-2.0).</p>"
             f"<p style='color: gray;'>No uploads. No telemetry. Just screenshots.</p>"
         )
         about_label = QLabel(about_html)

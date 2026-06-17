@@ -1,17 +1,18 @@
-# ClearShot v1.0.9
+# ClearShot v1.0.10
 
 ## Improvements
 
-- Reworked the vector icon renderer around cleaner SVG-style path icons for a more polished, consistent toolbar and tray menu look.
-- Made the post-capture **Edit** action visually distinct from the **Pen** tool by using a framed editor/image icon instead of another pencil.
-- Refined the quick toolbar icon silhouettes for pen, line, arrow, shape tools, text, blur, highlight, counter, undo, color, copy, save, close, and menu actions.
+- Replaced the custom in-app icon sketches with selected Pictogrammers Material Design Icons for a cleaner, more professional UI.
+- Updated the capture overlay, tray menu, settings/update action, text edit controls, and the full annotation editor toolbar to use the shared MDI-backed icon renderer.
+- Kept the post-capture **Edit** action visually distinct from the **Pen** tool with an image-edit icon.
+- Added third-party notices for the vendored Material Design Icons path data.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.0.9.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.0.10.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 

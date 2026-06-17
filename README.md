@@ -190,3 +190,6 @@ This software is provided "as is", without warranty of any kind. Use it at your 
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+Selected in-app interface icons are from Pictogrammers Material Design Icons,
+licensed under Apache-2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

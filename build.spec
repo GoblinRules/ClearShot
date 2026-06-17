@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         ('assets', 'assets'),
         ('resources', 'resources'),
+        ('THIRD_PARTY_NOTICES.md', '.'),
     ] + pyqt6_datas,
     hiddenimports=[
         'win32clipboard',
