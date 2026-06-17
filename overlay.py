@@ -1,7 +1,6 @@
 """ClearShot — Fullscreen transparent overlay for region selection."""
 
 import os
-import math
 import datetime
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, pyqtSignal, QSize, QTimer
 from PyQt6.QtGui import (
@@ -13,6 +12,7 @@ from capture import capture_all_monitors
 from clipboard_utils import copy_pixmap_to_clipboard
 from constants import DEFAULT_SAVE_DIR, IMAGE_FORMATS
 from icon_utils import paint_icon, ui_icon
+from tools import draw_arrow_annotation
 
 
 class SelectionOverlay(QWidget):
@@ -829,29 +829,7 @@ class SelectionOverlay(QWidget):
 
         elif item_type == 'arrow':
             start, end = item[3] - offset, item[4] - offset
-            pen = QPen(color, width, Qt.PenStyle.SolidLine)
-            painter.setPen(pen)
-            painter.drawLine(start, end)
-            # Arrowhead
-            dx = end.x() - start.x()
-            dy = end.y() - start.y()
-            length = math.hypot(dx, dy)
-            if length < 1:
-                return
-            angle = math.atan2(dy, dx)
-            head_len = max(10, width * 4)
-            p1x = end.x() - head_len * math.cos(angle - 0.4)
-            p1y = end.y() - head_len * math.sin(angle - 0.4)
-            p2x = end.x() - head_len * math.cos(angle + 0.4)
-            p2y = end.y() - head_len * math.sin(angle + 0.4)
-            path = QPainterPath()
-            path.moveTo(end.x(), end.y())
-            path.lineTo(p1x, p1y)
-            path.lineTo(p2x, p2y)
-            path.closeSubpath()
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(color))
-            painter.fillPath(path, QBrush(color))
+            draw_arrow_annotation(painter, start, end, color, width)
 
         elif item_type == 'rect':
             start, end = item[3] - offset, item[4] - offset

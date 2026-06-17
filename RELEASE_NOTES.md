@@ -1,18 +1,17 @@
-# ClearShot v1.0.10
+# ClearShot v1.0.11
 
 ## Improvements
 
-- Replaced the custom in-app icon sketches with selected Pictogrammers Material Design Icons for a cleaner, more professional UI.
-- Updated the capture overlay, tray menu, settings/update action, text edit controls, and the full annotation editor toolbar to use the shared MDI-backed icon renderer.
-- Kept the post-capture **Edit** action visually distinct from the **Pen** tool with an image-edit icon.
-- Added third-party notices for the vendored Material Design Icons path data.
+- Refined the actual drawn **Arrow** annotation, not just the toolbar icon.
+- Added a shared proportional arrow renderer for both the quick capture overlay and the full annotation editor.
+- Improved arrowheads so they are wider, cleaner, and better connected to the shaft at different line widths.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.0.10.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.0.11.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 

@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import (
-    QPainter, QPen, QColor, QFont, QPolygonF, QPainterPath,
+    QPainter, QPen, QColor, QFont, QPainterPath,
     QBrush, QPixmap, QImage,
 )
 import math
@@ -69,6 +69,70 @@ class LineItem(AnnotationItem):
         painter.drawLine(self.start, self.end)
 
 
+def draw_arrow_annotation(
+    painter: QPainter,
+    start: QPointF,
+    end: QPointF,
+    color: str | QColor,
+    width: int | float,
+) -> None:
+    """Draw a polished annotation arrow with a proportional filled head."""
+    arrow_color = QColor(color)
+    stroke_width = max(1.0, float(width))
+
+    dx = end.x() - start.x()
+    dy = end.y() - start.y()
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return
+
+    ux = dx / length
+    uy = dy / length
+    nx = -uy
+    ny = ux
+
+    head_len = max(14.0, stroke_width * 5.25)
+    head_len = min(head_len, max(8.0, length * 0.45))
+    head_half_width = max(stroke_width * 2.35, head_len * 0.43)
+    head_half_width = min(head_half_width, max(4.0, length * 0.30))
+
+    base = QPointF(end.x() - ux * head_len, end.y() - uy * head_len)
+    left = QPointF(base.x() + nx * head_half_width, base.y() + ny * head_half_width)
+    right = QPointF(base.x() - nx * head_half_width, base.y() - ny * head_half_width)
+
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    shaft_len = max(0.0, length - head_len * 0.56)
+    if shaft_len > stroke_width:
+        shaft_end = QPointF(start.x() + ux * shaft_len, start.y() + uy * shaft_len)
+        painter.setPen(QPen(
+            arrow_color,
+            stroke_width,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        ))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(start, shaft_end)
+
+    head = QPainterPath(end)
+    head.lineTo(left)
+    head.lineTo(right)
+    head.closeSubpath()
+    painter.setPen(QPen(
+        arrow_color,
+        max(1.0, stroke_width * 0.55),
+        Qt.PenStyle.SolidLine,
+        Qt.PenCapStyle.RoundCap,
+        Qt.PenJoinStyle.RoundJoin,
+    ))
+    painter.setBrush(QBrush(arrow_color))
+    painter.drawPath(head)
+
+    painter.restore()
+
+
 class ArrowItem(AnnotationItem):
     """Line with an arrowhead at the end."""
     
@@ -80,39 +144,7 @@ class ArrowItem(AnnotationItem):
         self.end: QPointF = QPointF()
 
     def render(self, painter: QPainter):
-        pen = QPen(QColor(self.color), self.width, Qt.PenStyle.SolidLine,
-                    Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.MiterJoin)
-        painter.setPen(pen)
-        painter.setBrush(QBrush(QColor(self.color)))
-
-        # Draw the line
-        painter.drawLine(self.start, self.end)
-
-        # Draw arrowhead
-        dx = self.end.x() - self.start.x()
-        dy = self.end.y() - self.start.y()
-        length = math.sqrt(dx * dx + dy * dy)
-        if length < 1:
-            return
-
-        # Arrowhead size proportional to line width
-        arrow_size = max(self.width * 4, 14)
-        angle = math.atan2(dy, dx)
-
-        # Arrowhead triangle
-        p1 = self.end
-        p2 = QPointF(
-            self.end.x() - arrow_size * math.cos(angle - math.pi / 6),
-            self.end.y() - arrow_size * math.sin(angle - math.pi / 6),
-        )
-        p3 = QPointF(
-            self.end.x() - arrow_size * math.cos(angle + math.pi / 6),
-            self.end.y() - arrow_size * math.sin(angle + math.pi / 6),
-        )
-
-        arrow_head = QPolygonF([p1, p2, p3])
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawPolygon(arrow_head)
+        draw_arrow_annotation(painter, self.start, self.end, self.color, self.width)
 
 
 class RectItem(AnnotationItem):
