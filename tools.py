@@ -77,6 +77,8 @@ def draw_arrow_annotation(
     width: int | float,
 ) -> None:
     """Draw a polished annotation arrow with a proportional filled head."""
+    start = QPointF(start)
+    end = QPointF(end)
     arrow_color = QColor(color)
     stroke_width = max(1.0, float(width))
 

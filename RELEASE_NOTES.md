@@ -1,17 +1,17 @@
-# ClearShot v1.0.11
+# ClearShot v1.0.12
 
-## Improvements
+## Fixes
 
-- Refined the actual drawn **Arrow** annotation, not just the toolbar icon.
-- Added a shared proportional arrow renderer for both the quick capture overlay and the full annotation editor.
-- Improved arrowheads so they are wider, cleaner, and better connected to the shaft at different line widths.
+- Fixed a crash when drawing arrows from the quick capture overlay.
+- Normalized arrow annotation endpoints so the shared renderer handles both overlay mouse points and editor canvas points safely.
+- Kept the refined proportional arrowhead rendering from v1.0.11.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.0.11.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.0.12.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 
