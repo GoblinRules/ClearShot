@@ -22,7 +22,7 @@
 - **Region Capture** — Select any area of your screen with a crosshair overlay
 - **Fullscreen Capture** — Grab your entire screen (or pick a specific monitor)
 - **Built-in Annotation Editor** — Draw, highlight, blur, and add text before saving
-- **Screen Recording** — Record a region, monitor, or all screens with pause/stop controls
+- **Screen Recording** — Record a region, monitor, or all screens with pause/stop controls, live annotations, and audio modes
 - **Quick Actions** — Copy to clipboard, save to file, or quick-save with one click
 - **System Tray** — Lives quietly in your tray, always ready
 - **Customizable Hotkeys** — Set your own screenshot and recording keybindings
@@ -106,6 +106,7 @@ Right-click the tray icon and open **Screen Record**:
 - **Record Region** - Drag to select an area, then recording starts
 - **Record All Monitors** - Record the full virtual desktop
 - **Record Monitor** - Pick a specific display
+- **Show Annotation Tools** - Draw pen strokes, arrows, shapes, text, and numbered markers into the live recording
 - **Pause Recording / Resume Recording** - Temporarily pause and continue the active recording
 - **Stop Recording** - Finish and save the recording to your configured recording folder
 
@@ -116,7 +117,7 @@ Default recording hotkeys:
 | **Pause/Resume Recording** | `Ctrl + Alt + Shift + P` |
 | **Stop Recording** | `Ctrl + Alt + Shift + X` |
 
-Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, and optional Windows DirectShow audio sources. System audio usually requires Stereo Mix or a loopback device to be enabled in Windows.
+Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, microphone input, and system audio from a selected output device.
 
 ### Region Capture
 
@@ -204,7 +205,7 @@ ClearShot/
 
 This software is provided "as is", without warranty of any kind. Use it at your own risk. The authors are not liable for any damages or data loss resulting from its use.
 
-**Privacy & Security:** ClearShot captures screen content and stores images locally on your machine. It does **not** transmit any data externally. However, screenshots may contain sensitive information — be mindful of what you capture, where you save it, and with whom you share it. You are solely responsible for the content you capture and distribute.
+**Privacy & Security:** ClearShot captures screen content and stores images/videos locally on your machine. It does **not** transmit any data externally. However, screenshots and recordings may contain sensitive information — be mindful of what you capture, where you save it, and with whom you share it. You are solely responsible for the content you capture and distribute.
 
 ---
 

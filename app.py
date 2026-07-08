@@ -18,9 +18,14 @@ from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
 from constants import APP_NAME, APP_VERSION, DEFAULT_SAVE_DIR, VIDEO_FORMATS
 from recording import (
+    AUDIO_MODE_MICROPHONE,
+    AUDIO_MODE_NONE,
+    AUDIO_MODE_SYSTEM,
     RecordingBorderOverlay,
+    RecordingAnnotationOverlay,
     RecordingSelectionOverlay,
     ScreenRecorder,
+    SYSTEM_AUDIO_DEFAULT_DEVICE,
     make_recording_path,
     normalize_recording_rect,
 )
@@ -207,6 +212,7 @@ class ClearShotApp:
         self._settings_window: SettingsWindow | None = None
         self._record_region_overlay: RecordingSelectionOverlay | None = None
         self._record_border_overlay: RecordingBorderOverlay | None = None
+        self._record_annotation_overlay: RecordingAnnotationOverlay | None = None
         self._recorder: ScreenRecorder | None = None
         self._recording_rect: QRect | None = None
 
@@ -423,6 +429,22 @@ class ClearShotApp:
         record_menu.setStyleSheet(menu.styleSheet())
 
         if self._is_recording():
+            annotations_visible = bool(
+                self._record_annotation_overlay is not None
+                and self._record_annotation_overlay.isVisible()
+            )
+            annotation_label = "Hide Annotation Tools" if annotations_visible else "Show Annotation Tools"
+            annotation_action = QAction(ui_icon("edit"), annotation_label, record_menu)
+            annotation_action.triggered.connect(self._toggle_recording_annotations)
+            record_menu.addAction(annotation_action)
+
+            if self._record_annotation_overlay is not None:
+                clear_annotation_action = QAction(ui_icon("trash"), "Clear Recording Annotations", record_menu)
+                clear_annotation_action.triggered.connect(self._clear_recording_annotations)
+                record_menu.addAction(clear_annotation_action)
+
+            record_menu.addSeparator()
+
             paused = bool(self._recorder and self._recorder.is_paused)
             pause_label = "Resume Recording" if paused else "Pause Recording"
             pause_icon = "play" if paused else "pause"
@@ -585,19 +607,34 @@ class ClearShotApp:
         extension = VIDEO_FORMATS.get(recording_format, VIDEO_FORMATS["MP4"])
         output_path = make_recording_path(save_path, f"{pattern}_Recording", extension)
         fps = int(self._config.get("recording_fps", 15))
-        audio_source = ""
-        if self._config.get("recording_audio_enabled", False):
-            audio_source = str(self._config.get("recording_audio_source", "")).strip()
-            if not audio_source:
+        audio_mode = self._get_recording_audio_mode()
+        microphone_source = ""
+        system_audio_device = SYSTEM_AUDIO_DEFAULT_DEVICE
+        if audio_mode == AUDIO_MODE_MICROPHONE:
+            microphone_source = str(self._config.get("recording_microphone_source", "")).strip()
+            if not microphone_source:
+                microphone_source = str(self._config.get("recording_audio_source", "")).strip()
+            if not microphone_source:
                 QMessageBox.warning(
                     None,
-                    "Recording Audio Source Required",
-                    "Choose an audio source in Settings before recording with audio.",
+                    "Recording Microphone Required",
+                    "Choose a microphone input in Settings before recording with microphone audio.",
                 )
                 return
+        elif audio_mode == AUDIO_MODE_SYSTEM:
+            system_audio_device = str(
+                self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE)
+            ).strip() or SYSTEM_AUDIO_DEFAULT_DEVICE
 
         self._recording_rect = normalize_recording_rect(rect)
-        self._recorder = ScreenRecorder(self._recording_rect, output_path, fps, audio_source or None)
+        self._recorder = ScreenRecorder(
+            self._recording_rect,
+            output_path,
+            fps,
+            audio_mode=audio_mode,
+            microphone_source=microphone_source,
+            system_audio_device=system_audio_device,
+        )
         self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
         self._recorder.recording_finished.connect(self._on_recording_finished)
         self._recorder.recording_failed.connect(self._on_recording_failed)
@@ -606,6 +643,14 @@ class ClearShotApp:
         self._recorder.finished.connect(self._build_tray_menu)
         self._recorder.start()
         self._build_tray_menu()
+
+    def _get_recording_audio_mode(self) -> str:
+        mode = str(self._config.get("recording_audio_mode", "")).strip()
+        if mode in {AUDIO_MODE_NONE, AUDIO_MODE_MICROPHONE, AUDIO_MODE_SYSTEM}:
+            return mode
+        if self._config.get("recording_audio_enabled", False):
+            return AUDIO_MODE_MICROPHONE
+        return AUDIO_MODE_NONE
 
     def _stop_recording(self):
         if self._recorder is not None and self._recorder.isRunning():
@@ -636,6 +681,7 @@ class ClearShotApp:
     def _on_recording_finished(self, path: str, duration: float, frames: int):
         self._recorder = None
         self._recording_rect = None
+        self._hide_recording_annotations()
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
@@ -649,6 +695,7 @@ class ClearShotApp:
     def _on_recording_failed(self, message: str):
         self._recorder = None
         self._recording_rect = None
+        self._hide_recording_annotations()
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
@@ -683,6 +730,36 @@ class ClearShotApp:
             except RuntimeError:
                 pass
             self._record_border_overlay = None
+
+    def _toggle_recording_annotations(self) -> None:
+        if not self._is_recording() or self._recording_rect is None:
+            return
+        if self._record_annotation_overlay is not None and self._record_annotation_overlay.isVisible():
+            self._record_annotation_overlay.hide()
+        else:
+            self._show_recording_annotations(self._recording_rect)
+        self._build_tray_menu()
+
+    def _show_recording_annotations(self, rect: QRect) -> None:
+        if self._record_annotation_overlay is None:
+            self._record_annotation_overlay = RecordingAnnotationOverlay(rect)
+        self._record_annotation_overlay.show()
+        self._record_annotation_overlay.raise_()
+        self._record_annotation_overlay.activateWindow()
+        if self._record_border_overlay is not None:
+            self._record_border_overlay.raise_()
+
+    def _hide_recording_annotations(self) -> None:
+        if self._record_annotation_overlay is not None:
+            try:
+                self._record_annotation_overlay.close()
+            except RuntimeError:
+                pass
+            self._record_annotation_overlay = None
+
+    def _clear_recording_annotations(self) -> None:
+        if self._record_annotation_overlay is not None:
+            self._record_annotation_overlay.clear_all()
 
     def _show_recording_busy_message(self):
         self._tray.showMessage(
@@ -772,6 +849,8 @@ class ClearShotApp:
                 self._record_region_overlay.close()
             except RuntimeError:
                 pass
+        if self._record_annotation_overlay:
+            self._hide_recording_annotations()
         if self._record_border_overlay:
             self._hide_recording_border()
         if self._recorder:

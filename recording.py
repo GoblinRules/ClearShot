@@ -6,17 +6,54 @@ import datetime
 import os
 import re
 import subprocess
+import tempfile
+import threading
 import time
+import wave
 from threading import Event
 
 import imageio_ffmpeg
 import mss
-from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QColorDialog,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QToolButton,
+    QWidget,
+)
 
 from capture import capture_all_monitors, ensure_dpi_awareness, get_virtual_screen_geometry
-from constants import DEFAULT_SAVE_DIR
+from constants import (
+    COLOR_PALETTE,
+    DEFAULT_FONT_SIZE,
+    DEFAULT_PEN_COLOR,
+    DEFAULT_PEN_WIDTH,
+    DEFAULT_SAVE_DIR,
+    TOOL_ARROW,
+    TOOL_COUNTER,
+    TOOL_ELLIPSE,
+    TOOL_FILLED_RECT,
+    TOOL_LINE,
+    TOOL_PEN,
+    TOOL_RECT,
+    TOOL_TEXT,
+)
+from icon_utils import ui_icon
+from tools import CounterItem, PenItem, TextItem, create_tool_item
+
+
+AUDIO_MODE_NONE = "none"
+AUDIO_MODE_MICROPHONE = "microphone"
+AUDIO_MODE_SYSTEM = "system"
+SYSTEM_AUDIO_DEFAULT_DEVICE = "__default__"
 
 
 def make_recording_path(
@@ -74,7 +111,7 @@ def _subprocess_creationflags() -> int:
 
 
 def list_audio_sources(timeout: float = 5.0) -> list[str]:
-    """Return available Windows DirectShow audio input device names."""
+    """Return available Windows DirectShow microphone/input device names."""
     try:
         proc = subprocess.run(
             [
@@ -118,6 +155,107 @@ def list_audio_sources(timeout: float = 5.0) -> list[str]:
     return names
 
 
+def list_system_audio_sources() -> list[tuple[str, str]]:
+    """Return available Windows output devices for loopback system-audio capture."""
+    try:
+        import soundcard as sc
+    except Exception:
+        return []
+
+    sources: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    try:
+        for speaker in sc.all_speakers():
+            device_id = str(speaker.id)
+            name = str(speaker.name)
+            if not device_id or device_id in seen:
+                continue
+            seen.add(device_id)
+            sources.append((name, device_id))
+    except Exception:
+        return []
+    return sources
+
+
+def _resolve_system_speaker(device_id: str | None):
+    import soundcard as sc
+
+    selected = (device_id or "").strip()
+    if not selected or selected == SYSTEM_AUDIO_DEFAULT_DEVICE:
+        return sc.default_speaker()
+
+    speakers = list(sc.all_speakers())
+    for speaker in speakers:
+        if str(speaker.id) == selected:
+            return speaker
+    for speaker in speakers:
+        if str(speaker.name) == selected:
+            return speaker
+    raise RuntimeError("Selected system audio output device was not found.")
+
+
+class _SystemAudioRecorder(threading.Thread):
+    """Record Windows output-loopback audio to a temporary WAV file."""
+
+    def __init__(
+        self,
+        path: str,
+        device_id: str | None,
+        stop_event: Event,
+        pause_event: Event,
+        sample_rate: int = 48000,
+        channels: int = 2,
+    ):
+        super().__init__(daemon=True)
+        self.path = path
+        self.device_id = device_id or SYSTEM_AUDIO_DEFAULT_DEVICE
+        self.stop_event = stop_event
+        self.pause_event = pause_event
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.frames = 0
+        self.error = ""
+
+    def run(self) -> None:
+        try:
+            import numpy as np
+            import soundcard as sc
+
+            speaker = _resolve_system_speaker(self.device_id)
+            loopback = sc.get_microphone(id=speaker.id, include_loopback=True)
+            block_size = 1024
+
+            with wave.open(self.path, "wb") as wav_file:
+                wav_file.setnchannels(self.channels)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(self.sample_rate)
+
+                with loopback.recorder(
+                    samplerate=self.sample_rate,
+                    channels=self.channels,
+                    blocksize=block_size,
+                ) as recorder:
+                    while not self.stop_event.is_set():
+                        if self.pause_event.is_set():
+                            self.stop_event.wait(0.05)
+                            continue
+
+                        data = recorder.record(numframes=block_size)
+                        if data is None or len(data) == 0:
+                            continue
+                        if data.ndim == 1:
+                            data = data.reshape(-1, 1)
+                        if data.shape[1] < self.channels:
+                            data = np.repeat(data[:, :1], self.channels, axis=1)
+                        data = data[:, :self.channels]
+                        pcm = np.clip(data, -1.0, 1.0)
+                        pcm = (pcm * 32767.0).astype("<i2", copy=False)
+                        wav_file.writeframes(pcm.tobytes())
+                        self.frames += len(pcm)
+        except Exception as exc:
+            self.error = str(exc) or "System audio recording failed."
+
+
 class ScreenRecorder(QThread):
     """Capture a screen rectangle to a video file on a worker thread."""
 
@@ -132,13 +270,17 @@ class ScreenRecorder(QThread):
         rect: QRect,
         output_path: str,
         fps: int = 15,
-        audio_source: str | None = None,
+        audio_mode: str = AUDIO_MODE_NONE,
+        microphone_source: str | None = None,
+        system_audio_device: str | None = None,
     ):
         super().__init__()
         self._rect = normalize_recording_rect(rect)
         self._output_path = output_path
         self._fps = max(1, min(30, int(fps or 15)))
-        self._audio_source = (audio_source or "").strip()
+        self._audio_mode = audio_mode or AUDIO_MODE_NONE
+        self._microphone_source = (microphone_source or "").strip()
+        self._system_audio_device = (system_audio_device or SYSTEM_AUDIO_DEFAULT_DEVICE).strip()
         self._stop_event = Event()
         self._pause_event = Event()
         self._last_error = ""
@@ -178,8 +320,10 @@ class ScreenRecorder(QThread):
 
         try:
             self.recording_started.emit(self._output_path)
-            if self._audio_source:
-                frames = self._run_with_audio()
+            if self._audio_mode == AUDIO_MODE_MICROPHONE:
+                frames = self._run_with_microphone()
+            elif self._audio_mode == AUDIO_MODE_SYSTEM:
+                frames = self._run_with_system_audio()
             else:
                 frames = self._run_silent()
         except Exception as exc:
@@ -219,9 +363,10 @@ class ScreenRecorder(QThread):
                     next_frame_at = time.perf_counter()
         return frames
 
-    def _run_silent(self) -> int:
+    def _run_silent(self, output_path: str | None = None) -> int:
+        target_path = output_path or self._output_path
         writer = imageio_ffmpeg.write_frames(
-            self._output_path,
+            target_path,
             (self._rect.width(), self._rect.height()),
             pix_fmt_in="rgb24",
             pix_fmt_out="yuv420p",
@@ -240,7 +385,7 @@ class ScreenRecorder(QThread):
             except Exception:
                 pass
 
-    def _run_with_audio(self) -> int:
+    def _run_with_microphone(self) -> int:
         command = [
             imageio_ffmpeg.get_ffmpeg_exe(),
             "-y",
@@ -262,7 +407,7 @@ class ScreenRecorder(QThread):
             "-f",
             "dshow",
             "-i",
-            f"audio={self._audio_source}",
+            f"audio={self._microphone_source}",
             "-map",
             "0:v:0",
             "-map",
@@ -318,6 +463,86 @@ class ScreenRecorder(QThread):
             self._last_error = self._read_process_error(proc)
             raise RuntimeError(self._last_error or f"ffmpeg exited with code {return_code}.")
         return frames
+
+    def _run_with_system_audio(self) -> int:
+        output_dir = os.path.dirname(os.path.abspath(self._output_path)) or os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
+        _, extension = os.path.splitext(self._output_path)
+        video_file = tempfile.NamedTemporaryFile(
+            prefix="clearshot_video_",
+            suffix=extension or ".mp4",
+            dir=output_dir,
+            delete=False,
+        )
+        audio_file = tempfile.NamedTemporaryFile(
+            prefix="clearshot_audio_",
+            suffix=".wav",
+            dir=output_dir,
+            delete=False,
+        )
+        temp_video_path = video_file.name
+        temp_audio_path = audio_file.name
+        video_file.close()
+        audio_file.close()
+
+        audio_recorder = _SystemAudioRecorder(
+            temp_audio_path,
+            self._system_audio_device,
+            self._stop_event,
+            self._pause_event,
+        )
+        try:
+            audio_recorder.start()
+            try:
+                frames = self._run_silent(temp_video_path)
+            finally:
+                self._stop_event.set()
+                audio_recorder.join(timeout=5)
+
+            if audio_recorder.error:
+                raise RuntimeError(audio_recorder.error)
+            if audio_recorder.frames <= 0:
+                raise RuntimeError("System audio did not produce any samples.")
+            self._mux_audio(temp_video_path, temp_audio_path, self._output_path)
+            return frames
+        finally:
+            for path in (temp_video_path, temp_audio_path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _mux_audio(self, video_path: str, audio_path: str, output_path: str) -> None:
+        command = [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            video_path,
+            "-i",
+            audio_path,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-shortest",
+            output_path,
+        ]
+        proc = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            creationflags=_subprocess_creationflags(),
+        )
+        if proc.returncode != 0:
+            error = proc.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(error or f"ffmpeg mux exited with code {proc.returncode}.")
 
     def _read_process_error(self, proc: subprocess.Popen) -> str:
         if proc.stderr is None:
@@ -401,6 +626,331 @@ class RecordingBorderOverlay(QWidget):
         painter.drawRoundedRect(badge, 4, 4)
         painter.setPen(QPen(QColor("#f5f7fb")))
         painter.drawText(badge.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignCenter, text)
+
+
+class RecordingAnnotationCanvas(QWidget):
+    """Transparent live-annotation canvas for active screen recordings."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setMouseTracking(True)
+
+        self._items = []
+        self._current_item = None
+        self.current_tool = TOOL_PEN
+        self.current_color = DEFAULT_PEN_COLOR
+        self.current_width = DEFAULT_PEN_WIDTH
+        self.font_size = DEFAULT_FONT_SIZE
+        self._counter_value = 1
+
+    def undo(self) -> None:
+        if not self._items:
+            return
+        item = self._items.pop()
+        if isinstance(item, CounterItem):
+            self._counter_value = max(1, self._counter_value - 1)
+        self.update()
+
+    def clear_all(self) -> None:
+        self._items.clear()
+        self._current_item = None
+        self._counter_value = 1
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for item in self._items:
+            item.render(painter)
+        if self._current_item is not None:
+            self._current_item.render(painter)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+
+        pos = QPointF(event.pos())
+        if self.current_tool == TOOL_TEXT:
+            self._place_text(pos)
+            return
+
+        if self.current_tool == TOOL_COUNTER:
+            item = CounterItem(color=self.current_color, width=self.current_width)
+            item.position = pos
+            item.number = self._counter_value
+            self._counter_value += 1
+            self._items.append(item)
+            self.update()
+            return
+
+        item = create_tool_item(self.current_tool, self.current_color, self.current_width)
+        if isinstance(item, PenItem):
+            item.add_point(pos)
+        elif hasattr(item, "start"):
+            item.start = pos
+            item.end = pos
+        self._current_item = item
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._current_item is None:
+            return
+
+        pos = QPointF(event.pos())
+        if isinstance(self._current_item, PenItem):
+            self._current_item.add_point(pos)
+        elif hasattr(self._current_item, "end"):
+            self._current_item.end = pos
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._current_item is None:
+            return
+        self._items.append(self._current_item)
+        self._current_item = None
+        self.update()
+
+    def _place_text(self, pos: QPointF) -> None:
+        text, ok = QInputDialog.getText(self, "Add Recording Text", "Enter text:")
+        if not ok or not text:
+            return
+        item = TextItem(color=self.current_color, width=self.current_width)
+        item.position = pos
+        item.text = text
+        item.font_size = self.font_size
+        self._items.append(item)
+        self.update()
+
+
+class RecordingAnnotationOverlay(QWidget):
+    """Topmost drawing surface for annotations captured in active recordings."""
+
+    def __init__(self, rect: QRect, parent=None):
+        super().__init__(parent)
+        self._record_rect = normalize_recording_rect(rect)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setGeometry(self._record_rect)
+
+        self._canvas = RecordingAnnotationCanvas(self)
+        self._canvas.setGeometry(self.rect())
+        self._toolbar = self._create_toolbar()
+        self._toolbar.setParent(self)
+        self._toolbar.move(8, 8)
+        self._toolbar.raise_()
+
+    def clear_all(self) -> None:
+        self._canvas.clear_all()
+
+    def undo(self) -> None:
+        self._canvas.undo()
+
+    def resizeEvent(self, event) -> None:
+        self._canvas.setGeometry(self.rect())
+        self._toolbar.raise_()
+        super().resizeEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        mods = event.modifiers()
+        if key == Qt.Key.Key_Escape:
+            self.hide()
+        elif key == Qt.Key.Key_Z and mods & Qt.KeyboardModifier.ControlModifier:
+            self.undo()
+        elif key == Qt.Key.Key_P:
+            self._set_tool(TOOL_PEN)
+            self._check_tool_button(TOOL_PEN)
+        elif key == Qt.Key.Key_L:
+            self._set_tool(TOOL_LINE)
+            self._check_tool_button(TOOL_LINE)
+        elif key == Qt.Key.Key_A:
+            self._set_tool(TOOL_ARROW)
+            self._check_tool_button(TOOL_ARROW)
+        elif key == Qt.Key.Key_R:
+            self._set_tool(TOOL_RECT)
+            self._check_tool_button(TOOL_RECT)
+        elif key == Qt.Key.Key_H:
+            self._set_tool(TOOL_FILLED_RECT)
+            self._check_tool_button(TOOL_FILLED_RECT)
+        elif key == Qt.Key.Key_E:
+            self._set_tool(TOOL_ELLIPSE)
+            self._check_tool_button(TOOL_ELLIPSE)
+        elif key == Qt.Key.Key_T:
+            self._set_tool(TOOL_TEXT)
+            self._check_tool_button(TOOL_TEXT)
+        elif key == Qt.Key.Key_N:
+            self._set_tool(TOOL_COUNTER)
+            self._check_tool_button(TOOL_COUNTER)
+        else:
+            super().keyPressEvent(event)
+
+    def _create_toolbar(self) -> QFrame:
+        toolbar = QFrame(self)
+        toolbar.setObjectName("recordingAnnotationToolbar")
+        toolbar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        toolbar.setStyleSheet("""
+            #recordingAnnotationToolbar {
+                background: rgba(35, 35, 35, 232);
+                border: 1px solid #555;
+                border-radius: 5px;
+            }
+            QToolButton, QPushButton {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 5px;
+                color: #ddd;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QToolButton:hover, QPushButton:hover {
+                background: #3d3d3d;
+                border-color: #666;
+            }
+            QToolButton:checked {
+                background: #0078D4;
+                border-color: #0078D4;
+            }
+            QLabel {
+                color: #aaa;
+                font-size: 11px;
+            }
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #555;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                width: 13px;
+                height: 13px;
+                margin: -5px 0;
+                background: #0099FF;
+                border-radius: 6px;
+            }
+        """)
+
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(6, 5, 6, 5)
+        layout.setSpacing(2)
+
+        self._tool_group = QButtonGroup(self)
+        self._tool_group.setExclusive(True)
+        tool_defs = [
+            (TOOL_PEN, "pen", "Pen (P)"),
+            (TOOL_LINE, "line", "Line (L)"),
+            (TOOL_ARROW, "arrow", "Arrow (A)"),
+            (TOOL_RECT, "rect", "Rectangle (R)"),
+            (TOOL_FILLED_RECT, "filled_rect", "Highlight (H)"),
+            (TOOL_ELLIPSE, "ellipse", "Ellipse (E)"),
+            (TOOL_TEXT, "text", "Text (T)"),
+            (TOOL_COUNTER, "counter", "Counter (N)"),
+        ]
+        for tool_id, icon_name, tooltip in tool_defs:
+            btn = QToolButton(toolbar)
+            btn.setIcon(ui_icon(icon_name))
+            btn.setIconSize(QSize(17, 17))
+            btn.setFixedSize(30, 28)
+            btn.setToolTip(tooltip)
+            btn.setCheckable(True)
+            btn.setProperty("tool_id", tool_id)
+            btn.clicked.connect(lambda checked, tid=tool_id: self._set_tool(tid))
+            self._tool_group.addButton(btn)
+            layout.addWidget(btn)
+            if tool_id == TOOL_PEN:
+                btn.setChecked(True)
+
+        layout.addWidget(self._separator())
+
+        for color in COLOR_PALETTE[:6]:
+            btn = QPushButton(toolbar)
+            btn.setFixedSize(22, 22)
+            btn.setToolTip(color)
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {color}; border: 2px solid #555; border-radius: 4px; }}"
+                "QPushButton:hover { border-color: #fff; }"
+            )
+            btn.clicked.connect(lambda checked, c=color: self._set_color(c))
+            layout.addWidget(btn)
+
+        custom_color_btn = QPushButton(toolbar)
+        custom_color_btn.setIcon(ui_icon("palette"))
+        custom_color_btn.setIconSize(QSize(16, 16))
+        custom_color_btn.setFixedSize(28, 24)
+        custom_color_btn.setToolTip("Custom color")
+        custom_color_btn.clicked.connect(self._pick_custom_color)
+        layout.addWidget(custom_color_btn)
+
+        layout.addWidget(self._separator())
+
+        layout.addWidget(QLabel("Size:", toolbar))
+        self._width_slider = QSlider(Qt.Orientation.Horizontal, toolbar)
+        self._width_slider.setRange(1, 20)
+        self._width_slider.setValue(DEFAULT_PEN_WIDTH)
+        self._width_slider.setFixedWidth(84)
+        self._width_slider.valueChanged.connect(self._set_width)
+        layout.addWidget(self._width_slider)
+
+        self._width_label = QLabel(str(DEFAULT_PEN_WIDTH), toolbar)
+        self._width_label.setFixedWidth(20)
+        layout.addWidget(self._width_label)
+
+        layout.addWidget(self._separator())
+
+        undo_btn = QToolButton(toolbar)
+        undo_btn.setIcon(ui_icon("undo"))
+        undo_btn.setIconSize(QSize(17, 17))
+        undo_btn.setFixedSize(30, 28)
+        undo_btn.setToolTip("Undo (Ctrl+Z)")
+        undo_btn.clicked.connect(self.undo)
+        layout.addWidget(undo_btn)
+
+        clear_btn = QToolButton(toolbar)
+        clear_btn.setIcon(ui_icon("trash"))
+        clear_btn.setIconSize(QSize(17, 17))
+        clear_btn.setFixedSize(30, 28)
+        clear_btn.setToolTip("Clear annotations")
+        clear_btn.clicked.connect(self.clear_all)
+        layout.addWidget(clear_btn)
+
+        toolbar.adjustSize()
+        return toolbar
+
+    def _separator(self) -> QFrame:
+        sep = QFrame(self._toolbar if hasattr(self, "_toolbar") else self)
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet("background: #555;")
+        return sep
+
+    def _set_tool(self, tool_id: str) -> None:
+        self._canvas.current_tool = tool_id
+
+    def _set_color(self, color: str) -> None:
+        self._canvas.current_color = color
+
+    def _pick_custom_color(self) -> None:
+        color = QColorDialog.getColor(QColor(self._canvas.current_color), self, "Pick a color")
+        if color.isValid():
+            self._canvas.current_color = color.name()
+
+    def _set_width(self, value: int) -> None:
+        self._canvas.current_width = value
+        self._canvas.font_size = max(10, value * 3)
+        self._width_label.setText(str(value))
+
+    def _check_tool_button(self, tool_id: str) -> None:
+        for btn in self._tool_group.buttons():
+            if btn.property("tool_id") == tool_id:
+                btn.setChecked(True)
+                break
 
 
 class RecordingSelectionOverlay(QWidget):

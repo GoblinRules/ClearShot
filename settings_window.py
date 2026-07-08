@@ -20,7 +20,14 @@ from PyQt6.QtWidgets import (
 )
 from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS, VIDEO_FORMATS
 from icon_utils import ui_icon
-from recording import list_audio_sources
+from recording import (
+    AUDIO_MODE_MICROPHONE,
+    AUDIO_MODE_NONE,
+    AUDIO_MODE_SYSTEM,
+    SYSTEM_AUDIO_DEFAULT_DEVICE,
+    list_audio_sources,
+    list_system_audio_sources,
+)
 
 GITHUB_REPO = "GoblinRules/ClearShot"
 
@@ -301,18 +308,27 @@ class SettingsWindow(QDialog):
         self._show_recording_border_cb = QCheckBox("Show a border around the recording area")
         recording_layout.addRow("", self._show_recording_border_cb)
 
-        self._recording_audio_cb = QCheckBox("Include audio")
-        self._recording_audio_cb.toggled.connect(self._refresh_audio_source_enabled)
-        recording_layout.addRow("", self._recording_audio_cb)
+        self._recording_audio_mode_combo = QComboBox()
+        self._recording_audio_mode_combo.addItem("No audio", AUDIO_MODE_NONE)
+        self._recording_audio_mode_combo.addItem("Microphone input", AUDIO_MODE_MICROPHONE)
+        self._recording_audio_mode_combo.addItem("System audio", AUDIO_MODE_SYSTEM)
+        self._recording_audio_mode_combo.currentIndexChanged.connect(self._refresh_audio_source_enabled)
+        recording_layout.addRow("Audio:", self._recording_audio_mode_combo)
 
         self._recording_audio_source_combo = QComboBox()
         self._recording_audio_source_combo.setEditable(True)
         self._recording_audio_source_combo.addItem("")
         for source in list_audio_sources():
             self._recording_audio_source_combo.addItem(source)
-        recording_layout.addRow("Audio source:", self._recording_audio_source_combo)
+        recording_layout.addRow("Microphone:", self._recording_audio_source_combo)
 
-        audio_note = QLabel("Audio uses Windows DirectShow device names. For system audio, enable Stereo Mix or a loopback device.")
+        self._recording_system_audio_combo = QComboBox()
+        self._recording_system_audio_combo.addItem("Default output device", SYSTEM_AUDIO_DEFAULT_DEVICE)
+        for name, device_id in list_system_audio_sources():
+            self._recording_system_audio_combo.addItem(name, device_id)
+        recording_layout.addRow("System audio:", self._recording_system_audio_combo)
+
+        audio_note = QLabel("Microphone uses Windows DirectShow input devices. System audio records the selected output device through Windows loopback.")
         audio_note.setWordWrap(True)
         audio_note.setStyleSheet("color: #888; font-style: italic;")
         recording_layout.addRow("", audio_note)
@@ -387,12 +403,13 @@ class SettingsWindow(QDialog):
             f"<p>A lightweight, privacy-respecting screenshot tool for Windows.</p>"
             f"<p>• Region & fullscreen capture<br>"
             f"• Region, monitor, and all-screen recording<br>"
+            f"• Live recording annotations and system audio capture<br>"
             f"• Annotation tools (pen, arrow, text, blur, and more)<br>"
             f"• Copy to clipboard or save to file<br>"
             f"• Global hotkeys</p>"
             f"<p><a href='https://github.com/{GITHUB_REPO}' style='color: #0099FF;'>GitHub</a></p>"
             f"<p style='color: gray;'>Interface icons use Material Design Icons by Pictogrammers (Apache-2.0).</p>"
-            f"<p style='color: gray;'>No uploads. No telemetry. Just screenshots.</p>"
+            f"<p style='color: gray;'>No uploads. No telemetry. Just local screenshots and recordings.</p>"
         )
         about_label = QLabel(about_html)
         about_label.setWordWrap(True)
@@ -444,6 +461,7 @@ class SettingsWindow(QDialog):
         <ol style="color: #ccc; margin-left: 8px;">
           <li>Right-click the tray icon and open <b>Screen Record</b></li>
           <li>Choose <b>Record Region</b>, <b>Record All Monitors</b>, or a specific monitor</li>
+          <li>Use <b>Show Annotation Tools</b> while recording to draw pen, arrows, shapes, text, and numbered markers into the video</li>
           <li>Use <b>Pause Recording</b>, <b>Resume Recording</b>, or <b>Stop Recording</b> from the tray menu</li>
         </ol>
         <table cellpadding="6" style="margin-left: 8px;">
@@ -452,7 +470,7 @@ class SettingsWindow(QDialog):
           <tr><td style="color: #ccc;"><b>Stop Recording</b></td>
               <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Alt + Shift + X</code></td></tr>
         </table>
-        <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, and optional DirectShow audio sources from Settings.</p>
+        <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, microphone input, or system audio from a selected output device.</p>
 
         <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
@@ -577,7 +595,9 @@ class SettingsWindow(QDialog):
         )
 
     def _refresh_audio_source_enabled(self):
-        self._recording_audio_source_combo.setEnabled(self._recording_audio_cb.isChecked())
+        mode = self._recording_audio_mode_combo.currentData()
+        self._recording_audio_source_combo.setEnabled(mode == AUDIO_MODE_MICROPHONE)
+        self._recording_system_audio_combo.setEnabled(mode == AUDIO_MODE_SYSTEM)
 
     def _load_values(self):
         """Load current config values into the UI."""
@@ -599,13 +619,26 @@ class SettingsWindow(QDialog):
         if fps_idx >= 0:
             self._recording_fps_combo.setCurrentIndex(fps_idx)
         self._show_recording_border_cb.setChecked(self._config.get("show_recording_border", True))
-        self._recording_audio_cb.setChecked(self._config.get("recording_audio_enabled", False))
-        audio_source = self._config.get("recording_audio_source", "")
+        audio_mode = self._config.get("recording_audio_mode", "")
+        if not audio_mode:
+            audio_mode = AUDIO_MODE_MICROPHONE if self._config.get("recording_audio_enabled", False) else AUDIO_MODE_NONE
+        audio_mode_idx = self._recording_audio_mode_combo.findData(audio_mode)
+        if audio_mode_idx >= 0:
+            self._recording_audio_mode_combo.setCurrentIndex(audio_mode_idx)
+
+        audio_source = self._config.get("recording_microphone_source", "")
+        if not audio_source:
+            audio_source = self._config.get("recording_audio_source", "")
         audio_source_idx = self._recording_audio_source_combo.findText(audio_source)
         if audio_source_idx >= 0:
             self._recording_audio_source_combo.setCurrentIndex(audio_source_idx)
         else:
             self._recording_audio_source_combo.setCurrentText(audio_source)
+
+        system_audio_device = self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE)
+        system_audio_idx = self._recording_system_audio_combo.findData(system_audio_device)
+        if system_audio_idx >= 0:
+            self._recording_system_audio_combo.setCurrentIndex(system_audio_idx)
         self._refresh_audio_source_enabled()
         self._hotkey_region._value = self._config.get_hotkey("region_capture")
         self._hotkey_region._display.setText(self._config.get_hotkey("region_capture"))
@@ -643,8 +676,14 @@ class SettingsWindow(QDialog):
         self._config.set("recording_format", self._recording_format_combo.currentText())
         self._config.set("recording_fps", int(self._recording_fps_combo.currentText()))
         self._config.set("show_recording_border", self._show_recording_border_cb.isChecked())
-        self._config.set("recording_audio_enabled", self._recording_audio_cb.isChecked())
-        self._config.set("recording_audio_source", self._recording_audio_source_combo.currentText().strip())
+        audio_mode = self._recording_audio_mode_combo.currentData() or AUDIO_MODE_NONE
+        microphone_source = self._recording_audio_source_combo.currentText().strip()
+        system_audio_device = self._recording_system_audio_combo.currentData() or SYSTEM_AUDIO_DEFAULT_DEVICE
+        self._config.set("recording_audio_mode", audio_mode)
+        self._config.set("recording_audio_enabled", audio_mode != AUDIO_MODE_NONE)
+        self._config.set("recording_audio_source", microphone_source if audio_mode == AUDIO_MODE_MICROPHONE else "")
+        self._config.set("recording_microphone_source", microphone_source)
+        self._config.set("recording_system_audio_device", system_audio_device)
         self._config.set_hotkey("region_capture", self._hotkey_region.value)
         self._config.set_hotkey("fullscreen_capture", self._hotkey_fullscreen.value)
         self._config.set_hotkey("recording_pause_resume", self._hotkey_record_pause.value)

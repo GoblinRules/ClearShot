@@ -34,3 +34,23 @@ ClearShot uses imageio-ffmpeg to write MP4 screen recordings.
 The Windows wheel includes an ffmpeg executable used for video encoding.
 FFmpeg is available from https://ffmpeg.org/ and is distributed under its
 own licensing terms.
+
+## SoundCard
+
+ClearShot uses SoundCard to capture Windows system audio through output-device
+loopback when the System audio recording mode is selected.
+
+- Project: SoundCard
+- Version: 0.4.6
+- Repository: https://github.com/bastibe/SoundCard
+- License: BSD-3-Clause
+
+## NumPy
+
+SoundCard depends on NumPy for audio sample buffering, and the packaged
+ClearShot executable includes NumPy runtime components.
+
+- Project: NumPy
+- Version: 2.3.2
+- Website: https://numpy.org/
+- License: BSD-3-Clause

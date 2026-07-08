@@ -1,26 +1,25 @@
-# ClearShot v1.2.0
+# ClearShot v1.3.0
 
 ## New
 
-- Added a visible recording border so the active recording area is clear while recording.
-- Added a recording indicator badge to the system tray icon, including a paused state.
-- Added Pause Recording and Resume Recording controls to the tray menu.
-- Added global hotkeys for Pause/Resume Recording and Stop Recording.
-- Added a dedicated recording save folder setting.
-- Added MP4/MKV recording export format selection.
-- Added optional Windows DirectShow audio source selection for recordings.
+- Added a distinct System audio recording mode that captures the selected Windows output device through loopback.
+- Kept microphone capture as a separate Microphone input mode with its own input-device selector.
+- Added live recording annotation tools from the tray menu while recording.
+- Added pen, line, arrow, rectangle, highlight, ellipse, text, and numbered marker tools for live recordings.
+- Added undo and clear controls for live recording annotations.
 
 ## Improved
 
-- Updated Help/About content with the screen recording workflow and recording hotkeys.
-- Updated README documentation for portable and installer downloads, recording controls, and recording settings.
+- Updated Settings so recording audio is clearly split into No audio, Microphone input, and System audio.
+- Migrated older enabled-audio settings to Microphone input mode automatically.
+- Updated Help/About and README documentation for recording audio modes and live recording annotations.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.2.0.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.3.0.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 
@@ -29,5 +28,6 @@
 
 ## Notes
 
-- Audio recording is off by default. Enable it in Settings and choose a Windows DirectShow audio source.
-- System audio usually requires Stereo Mix or a virtual loopback device to be enabled in Windows.
+- System audio records from the selected Windows output device. The default output device is used unless another output is selected.
+- Microphone recording still uses Windows DirectShow input devices.
+- Live recording annotations are captured into the video because they are drawn over the active recording area.

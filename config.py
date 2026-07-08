@@ -30,8 +30,11 @@ DEFAULT_SETTINGS = {
     "recording_format": "MP4",
     "recording_fps": 15,
     "show_recording_border": True,
+    "recording_audio_mode": "none",
     "recording_audio_enabled": False,
     "recording_audio_source": "",
+    "recording_microphone_source": "",
+    "recording_system_audio_device": "__default__",
     "play_sound": False,
 }
 
@@ -56,6 +59,9 @@ class Config:
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     saved = json.load(f)
+                had_audio_mode = "recording_audio_mode" in saved
+                legacy_audio_enabled = bool(saved.get("recording_audio_enabled", False))
+                legacy_audio_source = str(saved.get("recording_audio_source", "") or "")
                 # Merge with defaults (so new keys are always present)
                 for key, value in DEFAULT_SETTINGS.items():
                     if key not in saved:
@@ -64,6 +70,10 @@ class Config:
                         for hk_key, hk_val in value.items():
                             if hk_key not in saved[key]:
                                 saved[key][hk_key] = hk_val
+                if not had_audio_mode:
+                    saved["recording_audio_mode"] = "microphone" if legacy_audio_enabled else "none"
+                if not saved.get("recording_microphone_source") and legacy_audio_source:
+                    saved["recording_microphone_source"] = legacy_audio_source
                 self._settings = saved
             except (json.JSONDecodeError, IOError):
                 self._settings = DEFAULT_SETTINGS.copy()
