@@ -22,9 +22,10 @@
 - **Region Capture** — Select any area of your screen with a crosshair overlay
 - **Fullscreen Capture** — Grab your entire screen (or pick a specific monitor)
 - **Built-in Annotation Editor** — Draw, highlight, blur, and add text before saving
+- **Screen Recording** — Record a region, monitor, or all screens with pause/stop controls
 - **Quick Actions** — Copy to clipboard, save to file, or quick-save with one click
 - **System Tray** — Lives quietly in your tray, always ready
-- **Customizable Hotkeys** — Set your own keybindings
+- **Customizable Hotkeys** — Set your own screenshot and recording keybindings
 - **Auto-Start** — Optionally launch on Windows startup
 - **Dark UI** — Clean, modern dark theme
 
@@ -63,11 +64,11 @@
 
 ## 🚀 Getting Started
 
-### Option 1: Download the Portable Executable
+### Option 1: Download a Release
 
 1. Go to the [Releases](https://github.com/GoblinRules/ClearShot/releases) page
-2. Download `ClearShot.exe`
-3. Run it — no installation required
+2. Download `ClearShot.exe` for the portable app, or `ClearShot_Setup_<version>.exe` for the full installer
+3. Run the portable app directly, or install it with Start Menu, desktop shortcut, and startup options
 
 ### Option 2: Run from Source
 
@@ -105,7 +106,17 @@ Right-click the tray icon and open **Screen Record**:
 - **Record Region** - Drag to select an area, then recording starts
 - **Record All Monitors** - Record the full virtual desktop
 - **Record Monitor** - Pick a specific display
-- **Stop Recording** - Finish and save the MP4 to your configured save folder
+- **Pause Recording / Resume Recording** - Temporarily pause and continue the active recording
+- **Stop Recording** - Finish and save the recording to your configured recording folder
+
+Default recording hotkeys:
+
+| Action | Default Hotkey |
+|--------|---------------|
+| **Pause/Resume Recording** | `Ctrl + Alt + Shift + P` |
+| **Stop Recording** | `Ctrl + Alt + Shift + X` |
+
+Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, and optional Windows DirectShow audio sources. System audio usually requires Stereo Mix or a loopback device to be enabled in Windows.
 
 ### Region Capture
 
@@ -143,8 +154,8 @@ After opening the editor, you have access to a full toolbar:
 
 Right-click the tray icon → **Settings**, or the settings window offers three tabs:
 
-- **General** — Save location, image format (PNG/JPEG/BMP), filename pattern
-- **Hotkeys** — Customize keyboard shortcuts
+- **General** — Screenshot save location, image format, filename pattern, recording folder, recording format, audio, and border options
+- **Hotkeys** — Customize screenshot and screen recording shortcuts
 - **Startup** — Enable/disable launching ClearShot on Windows startup
 
 ---
@@ -170,6 +181,7 @@ ClearShot/
 ├── main.py              # Entry point with single-instance lock
 ├── app.py               # System tray app & core orchestration
 ├── overlay.py           # Screen overlay for region selection
+├── recording.py         # Screen recording worker and recording overlays
 ├── annotator.py         # Built-in annotation editor
 ├── capture.py           # Screen capture via mss
 ├── clipboard_utils.py   # Clipboard operations (Win32)

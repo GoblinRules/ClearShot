@@ -18,8 +18,9 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit, QSpacerItem, QSizePolicy, QFrame,
     QScrollArea,
 )
-from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS
+from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS, VIDEO_FORMATS
 from icon_utils import ui_icon
+from recording import list_audio_sources
 
 GITHUB_REPO = "GoblinRules/ClearShot"
 
@@ -278,10 +279,43 @@ class SettingsWindow(QDialog):
         # Recording
         recording_group = QGroupBox("Screen Recording")
         recording_layout = QFormLayout(recording_group)
+
+        recording_path_widget = QWidget()
+        recording_path_layout = QHBoxLayout(recording_path_widget)
+        recording_path_layout.setContentsMargins(0, 0, 0, 0)
+        self._recording_path_edit = QLineEdit()
+        recording_path_layout.addWidget(self._recording_path_edit)
+        recording_browse_btn = QPushButton("Browse...")
+        recording_browse_btn.clicked.connect(self._browse_recording_path)
+        recording_path_layout.addWidget(recording_browse_btn)
+        recording_layout.addRow("Save location:", recording_path_widget)
+
+        self._recording_format_combo = QComboBox()
+        self._recording_format_combo.addItems(VIDEO_FORMATS.keys())
+        recording_layout.addRow("Export format:", self._recording_format_combo)
+
         self._recording_fps_combo = QComboBox()
         self._recording_fps_combo.addItems(["10", "15", "20", "30"])
         recording_layout.addRow("Frame rate:", self._recording_fps_combo)
-        recording_layout.addRow("", QLabel("Recordings are saved as MP4 files"))
+
+        self._show_recording_border_cb = QCheckBox("Show a border around the recording area")
+        recording_layout.addRow("", self._show_recording_border_cb)
+
+        self._recording_audio_cb = QCheckBox("Include audio")
+        self._recording_audio_cb.toggled.connect(self._refresh_audio_source_enabled)
+        recording_layout.addRow("", self._recording_audio_cb)
+
+        self._recording_audio_source_combo = QComboBox()
+        self._recording_audio_source_combo.setEditable(True)
+        self._recording_audio_source_combo.addItem("")
+        for source in list_audio_sources():
+            self._recording_audio_source_combo.addItem(source)
+        recording_layout.addRow("Audio source:", self._recording_audio_source_combo)
+
+        audio_note = QLabel("Audio uses Windows DirectShow device names. For system audio, enable Stereo Mix or a loopback device.")
+        audio_note.setWordWrap(True)
+        audio_note.setStyleSheet("color: #888; font-style: italic;")
+        recording_layout.addRow("", audio_note)
         layout.addWidget(recording_group)
 
         layout.addStretch()
@@ -299,6 +333,12 @@ class SettingsWindow(QDialog):
 
         self._hotkey_fullscreen = HotkeyEdit()
         hk_layout.addRow("Fullscreen capture:", self._hotkey_fullscreen)
+
+        self._hotkey_record_pause = HotkeyEdit()
+        hk_layout.addRow("Pause/resume recording:", self._hotkey_record_pause)
+
+        self._hotkey_record_stop = HotkeyEdit()
+        hk_layout.addRow("Stop recording:", self._hotkey_record_stop)
 
         layout.addWidget(hotkey_group)
 
@@ -346,6 +386,7 @@ class SettingsWindow(QDialog):
             f"<h2 style='margin: 0;'>{APP_NAME} v{APP_VERSION}</h2>"
             f"<p>A lightweight, privacy-respecting screenshot tool for Windows.</p>"
             f"<p>• Region & fullscreen capture<br>"
+            f"• Region, monitor, and all-screen recording<br>"
             f"• Annotation tools (pen, arrow, text, blur, and more)<br>"
             f"• Copy to clipboard or save to file<br>"
             f"• Global hotkeys</p>"
@@ -403,9 +444,15 @@ class SettingsWindow(QDialog):
         <ol style="color: #ccc; margin-left: 8px;">
           <li>Right-click the tray icon and open <b>Screen Record</b></li>
           <li>Choose <b>Record Region</b>, <b>Record All Monitors</b>, or a specific monitor</li>
-          <li>Use <b>Screen Record - Stop Recording</b> from the tray menu to finish</li>
+          <li>Use <b>Pause Recording</b>, <b>Resume Recording</b>, or <b>Stop Recording</b> from the tray menu</li>
         </ol>
-        <p style="color: #aaa; margin-left: 8px;">MP4 recordings are saved to your configured save folder.</p>
+        <table cellpadding="6" style="margin-left: 8px;">
+          <tr><td style="color: #ccc;"><b>Pause/Resume</b></td>
+              <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Alt + Shift + P</code></td></tr>
+          <tr><td style="color: #ccc;"><b>Stop Recording</b></td>
+              <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Alt + Shift + X</code></td></tr>
+        </table>
+        <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, and optional DirectShow audio sources from Settings.</p>
 
         <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
@@ -529,6 +576,9 @@ class SettingsWindow(QDialog):
             f"<p style='color: gray;'>{msg}</p>",
         )
 
+    def _refresh_audio_source_enabled(self):
+        self._recording_audio_source_combo.setEnabled(self._recording_audio_cb.isChecked())
+
     def _load_values(self):
         """Load current config values into the UI."""
         self._save_path_edit.setText(self._config.get("save_path", ""))
@@ -539,14 +589,32 @@ class SettingsWindow(QDialog):
             self._format_combo.setCurrentIndex(idx)
         
         self._pattern_edit.setText(self._config.get("filename_pattern", "ClearShot_{timestamp}"))
+        self._recording_path_edit.setText(self._config.get("recording_save_path", ""))
+        recording_format = self._config.get("recording_format", "MP4")
+        recording_format_idx = self._recording_format_combo.findText(recording_format)
+        if recording_format_idx >= 0:
+            self._recording_format_combo.setCurrentIndex(recording_format_idx)
         fps = str(self._config.get("recording_fps", 15))
         fps_idx = self._recording_fps_combo.findText(fps)
         if fps_idx >= 0:
             self._recording_fps_combo.setCurrentIndex(fps_idx)
+        self._show_recording_border_cb.setChecked(self._config.get("show_recording_border", True))
+        self._recording_audio_cb.setChecked(self._config.get("recording_audio_enabled", False))
+        audio_source = self._config.get("recording_audio_source", "")
+        audio_source_idx = self._recording_audio_source_combo.findText(audio_source)
+        if audio_source_idx >= 0:
+            self._recording_audio_source_combo.setCurrentIndex(audio_source_idx)
+        else:
+            self._recording_audio_source_combo.setCurrentText(audio_source)
+        self._refresh_audio_source_enabled()
         self._hotkey_region._value = self._config.get_hotkey("region_capture")
         self._hotkey_region._display.setText(self._config.get_hotkey("region_capture"))
         self._hotkey_fullscreen._value = self._config.get_hotkey("fullscreen_capture")
         self._hotkey_fullscreen._display.setText(self._config.get_hotkey("fullscreen_capture"))
+        self._hotkey_record_pause._value = self._config.get_hotkey("recording_pause_resume")
+        self._hotkey_record_pause._display.setText(self._config.get_hotkey("recording_pause_resume"))
+        self._hotkey_record_stop._value = self._config.get_hotkey("recording_stop")
+        self._hotkey_record_stop._display.setText(self._config.get_hotkey("recording_stop"))
         self._auto_start_cb.setChecked(self._config.get("start_with_windows", False))
         self._show_notif_cb.setChecked(self._config.get("show_tray_notifications", True))
         self._copy_on_save_cb.setChecked(self._config.get("copy_to_clipboard_on_save", True))
@@ -559,14 +627,28 @@ class SettingsWindow(QDialog):
         if path:
             self._save_path_edit.setText(path)
 
+    def _browse_recording_path(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Select Recording Directory", self._recording_path_edit.text()
+        )
+        if path:
+            self._recording_path_edit.setText(path)
+
     def _save_and_close(self):
         """Save all settings and close the dialog."""
         self._config.set("save_path", self._save_path_edit.text())
         self._config.set("image_format", self._format_combo.currentText())
         self._config.set("filename_pattern", self._pattern_edit.text())
+        self._config.set("recording_save_path", self._recording_path_edit.text())
+        self._config.set("recording_format", self._recording_format_combo.currentText())
         self._config.set("recording_fps", int(self._recording_fps_combo.currentText()))
+        self._config.set("show_recording_border", self._show_recording_border_cb.isChecked())
+        self._config.set("recording_audio_enabled", self._recording_audio_cb.isChecked())
+        self._config.set("recording_audio_source", self._recording_audio_source_combo.currentText().strip())
         self._config.set_hotkey("region_capture", self._hotkey_region.value)
         self._config.set_hotkey("fullscreen_capture", self._hotkey_fullscreen.value)
+        self._config.set_hotkey("recording_pause_resume", self._hotkey_record_pause.value)
+        self._config.set_hotkey("recording_stop", self._hotkey_record_stop.value)
         self._config.set("start_with_windows", self._auto_start_cb.isChecked())
         self._config.set("show_tray_notifications", self._show_notif_cb.isChecked())
         self._config.set("copy_to_clipboard_on_save", self._copy_on_save_cb.isChecked())

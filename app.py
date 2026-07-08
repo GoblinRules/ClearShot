@@ -4,7 +4,7 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
-from PyQt6.QtCore import QRect, Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QRect, QRectF, Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox,
@@ -16,8 +16,9 @@ from icon_utils import ui_icon
 from capture import capture_all_monitors, capture_region, get_monitor_list, ensure_dpi_awareness
 from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
-from constants import APP_NAME, APP_VERSION, DEFAULT_SAVE_DIR
+from constants import APP_NAME, APP_VERSION, DEFAULT_SAVE_DIR, VIDEO_FORMATS
 from recording import (
+    RecordingBorderOverlay,
     RecordingSelectionOverlay,
     ScreenRecorder,
     make_recording_path,
@@ -37,6 +38,8 @@ WM_APP_QUIT = 0x8002     # custom message to exit the message loop
 # Hotkey IDs
 _HOTKEY_REGION = 1
 _HOTKEY_FULLSCREEN = 2
+_HOTKEY_RECORDING_PAUSE = 3
+_HOTKEY_RECORDING_STOP = 4
 
 # Virtual-key code map (lowercase name → VK code)
 _VK_MAP = {
@@ -112,6 +115,8 @@ class HotkeyThread(QThread):
 
     region_capture_triggered = pyqtSignal()
     fullscreen_capture_triggered = pyqtSignal()
+    recording_pause_resume_triggered = pyqtSignal()
+    recording_stop_triggered = pyqtSignal()
 
     def __init__(self, config: Config):
         super().__init__()
@@ -132,6 +137,10 @@ class HotkeyThread(QThread):
                     self.region_capture_triggered.emit()
                 elif hotkey_id == _HOTKEY_FULLSCREEN:
                     self.fullscreen_capture_triggered.emit()
+                elif hotkey_id == _HOTKEY_RECORDING_PAUSE:
+                    self.recording_pause_resume_triggered.emit()
+                elif hotkey_id == _HOTKEY_RECORDING_STOP:
+                    self.recording_stop_triggered.emit()
             elif msg.message == WM_APP_REFRESH:
                 self._unregister_all(user32)
                 self._register_all(user32)
@@ -143,29 +152,30 @@ class HotkeyThread(QThread):
         self._unregister_all(user32)
 
     def _register_all(self, user32):
-        """Register both hotkeys from current config."""
-        region_key = self._config.get_hotkey("region_capture")
-        mods, vk = _parse_hotkey(region_key)
-        if vk is not None:
-            if not user32.RegisterHotKey(None, _HOTKEY_REGION, mods, vk):
-                print(f"Failed to register region hotkey '{region_key}' "
+        """Register all hotkeys from current config."""
+        registrations = [
+            (_HOTKEY_REGION, "region_capture", "region capture"),
+            (_HOTKEY_FULLSCREEN, "fullscreen_capture", "fullscreen capture"),
+            (_HOTKEY_RECORDING_PAUSE, "recording_pause_resume", "recording pause/resume"),
+            (_HOTKEY_RECORDING_STOP, "recording_stop", "recording stop"),
+        ]
+        for hotkey_id, action, label in registrations:
+            key = self._config.get_hotkey(action)
+            mods, vk = _parse_hotkey(key)
+            if vk is None:
+                continue
+            if not user32.RegisterHotKey(None, hotkey_id, mods, vk):
+                print(f"Failed to register {label} hotkey '{key}' "
                       f"(error {ctypes.GetLastError()})")
             else:
-                print(f"Registered region hotkey: {region_key}")
-
-        fullscreen_key = self._config.get_hotkey("fullscreen_capture")
-        mods, vk = _parse_hotkey(fullscreen_key)
-        if vk is not None:
-            if not user32.RegisterHotKey(None, _HOTKEY_FULLSCREEN, mods, vk):
-                print(f"Failed to register fullscreen hotkey '{fullscreen_key}' "
-                      f"(error {ctypes.GetLastError()})")
-            else:
-                print(f"Registered fullscreen hotkey: {fullscreen_key}")
+                print(f"Registered {label} hotkey: {key}")
 
     def _unregister_all(self, user32):
-        """Unregister both hotkey IDs (safe to call even if not registered)."""
+        """Unregister all hotkey IDs (safe to call even if not registered)."""
         user32.UnregisterHotKey(None, _HOTKEY_REGION)
         user32.UnregisterHotKey(None, _HOTKEY_FULLSCREEN)
+        user32.UnregisterHotKey(None, _HOTKEY_RECORDING_PAUSE)
+        user32.UnregisterHotKey(None, _HOTKEY_RECORDING_STOP)
 
     def refresh_hotkeys(self):
         """Re-register hotkeys after settings change.
@@ -196,13 +206,17 @@ class ClearShotApp:
         self._annotator: AnnotatorWindow | None = None
         self._settings_window: SettingsWindow | None = None
         self._record_region_overlay: RecordingSelectionOverlay | None = None
+        self._record_border_overlay: RecordingBorderOverlay | None = None
         self._recorder: ScreenRecorder | None = None
+        self._recording_rect: QRect | None = None
 
         # Ensure DPI awareness
         ensure_dpi_awareness()
 
         # Create tray icon
         self._app_icon = self._create_app_icon()
+        self._recording_icon = self._create_recording_tray_icon(paused=False)
+        self._paused_recording_icon = self._create_recording_tray_icon(paused=True)
         self._tray = QSystemTrayIcon()
         self._tray.setIcon(self._app_icon)
         self._tray.setToolTip(f"{APP_NAME} v{APP_VERSION}")
@@ -226,6 +240,10 @@ class ClearShotApp:
         self._hotkey_thread.fullscreen_capture_triggered.connect(
             self._start_fullscreen_capture
         )
+        self._hotkey_thread.recording_pause_resume_triggered.connect(
+            self._toggle_recording_pause
+        )
+        self._hotkey_thread.recording_stop_triggered.connect(self._stop_recording)
         self._hotkey_thread.start()
 
         # Show startup notification
@@ -311,6 +329,48 @@ class ClearShotApp:
         painter.end()
         return QIcon(pixmap)
 
+    def _create_recording_tray_icon(self, paused: bool = False) -> QIcon:
+        """Create a tray icon variant with a small recording state badge."""
+        size = 64
+        pixmap = self._app_icon.pixmap(size, size)
+        if pixmap.isNull():
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        badge_color = QColor("#ffb020" if paused else "#ff3b30")
+        shadow = QColor(0, 0, 0, 180)
+        badge = QRectF(size * 0.58, size * 0.58, size * 0.34, size * 0.34)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(shadow)
+        painter.drawEllipse(badge.adjusted(2, 2, 2, 2))
+        painter.setBrush(badge_color)
+        painter.drawEllipse(badge)
+        painter.setBrush(QColor("#ffffff"))
+        if paused:
+            bar_w = size * 0.045
+            bar_h = size * 0.15
+            y = badge.center().y() - bar_h / 2
+            painter.drawRoundedRect(QRectF(badge.center().x() - bar_w * 1.8, y, bar_w, bar_h), 1, 1)
+            painter.drawRoundedRect(QRectF(badge.center().x() + bar_w * 0.8, y, bar_w, bar_h), 1, 1)
+        else:
+            dot = QRectF(0, 0, size * 0.11, size * 0.11)
+            dot.moveCenter(badge.center())
+            painter.drawEllipse(dot)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _set_recording_indicator(self, recording: bool, paused: bool = False) -> None:
+        if recording:
+            self._tray.setIcon(self._paused_recording_icon if paused else self._recording_icon)
+            state = "Paused" if paused else "Recording"
+            self._tray.setToolTip(f"{APP_NAME} v{APP_VERSION} - {state}")
+        else:
+            self._tray.setIcon(self._app_icon)
+            self._tray.setToolTip(f"{APP_NAME} v{APP_VERSION}")
+
     def _build_tray_menu(self):
         """Build the system tray context menu."""
         menu = QMenu()
@@ -363,6 +423,13 @@ class ClearShotApp:
         record_menu.setStyleSheet(menu.styleSheet())
 
         if self._is_recording():
+            paused = bool(self._recorder and self._recorder.is_paused)
+            pause_label = "Resume Recording" if paused else "Pause Recording"
+            pause_icon = "play" if paused else "pause"
+            pause_action = QAction(ui_icon(pause_icon), pause_label, record_menu)
+            pause_action.triggered.connect(self._toggle_recording_pause)
+            record_menu.addAction(pause_action)
+
             stop_action = QAction(ui_icon("stop"), "Stop Recording", record_menu)
             stop_action.triggered.connect(self._stop_recording)
             record_menu.addAction(stop_action)
@@ -504,20 +571,38 @@ class ClearShotApp:
         QTimer.singleShot(250, lambda r=QRect(rect), name=label: self._start_recording_rect(r, name))
 
     def _start_recording_rect(self, rect: QRect, label: str):
-        """Start a background MP4 recording for the given screen rectangle."""
+        """Start a background recording for the given screen rectangle."""
         if self._is_recording():
             self._show_recording_busy_message()
             return
 
-        save_path = self._config.get("save_path", DEFAULT_SAVE_DIR)
+        save_path = self._config.get(
+            "recording_save_path",
+            os.path.join(DEFAULT_SAVE_DIR, "Recordings"),
+        )
         pattern = self._config.get("filename_pattern", "ClearShot_{timestamp}")
-        output_path = make_recording_path(save_path, f"{pattern}_Recording")
+        recording_format = self._config.get("recording_format", "MP4")
+        extension = VIDEO_FORMATS.get(recording_format, VIDEO_FORMATS["MP4"])
+        output_path = make_recording_path(save_path, f"{pattern}_Recording", extension)
         fps = int(self._config.get("recording_fps", 15))
+        audio_source = ""
+        if self._config.get("recording_audio_enabled", False):
+            audio_source = str(self._config.get("recording_audio_source", "")).strip()
+            if not audio_source:
+                QMessageBox.warning(
+                    None,
+                    "Recording Audio Source Required",
+                    "Choose an audio source in Settings before recording with audio.",
+                )
+                return
 
-        self._recorder = ScreenRecorder(normalize_recording_rect(rect), output_path, fps)
+        self._recording_rect = normalize_recording_rect(rect)
+        self._recorder = ScreenRecorder(self._recording_rect, output_path, fps, audio_source or None)
         self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
         self._recorder.recording_finished.connect(self._on_recording_finished)
         self._recorder.recording_failed.connect(self._on_recording_failed)
+        self._recorder.recording_paused.connect(self._on_recording_paused)
+        self._recorder.recording_resumed.connect(self._on_recording_resumed)
         self._recorder.finished.connect(self._build_tray_menu)
         self._recorder.start()
         self._build_tray_menu()
@@ -532,16 +617,27 @@ class ClearShotApp:
                 1500,
             )
 
+    def _toggle_recording_pause(self):
+        if self._recorder is None or not self._recorder.isRunning():
+            return
+        self._recorder.toggle_pause()
+
     def _on_recording_started(self, path: str, target: str):
+        self._set_recording_indicator(True, False)
+        if self._recording_rect is not None and self._config.get("show_recording_border", True):
+            self._show_recording_border(self._recording_rect)
         self._tray.showMessage(
             APP_NAME,
-            f"Recording {target}. Use the tray menu to stop.",
+            f"Recording {target}. Use the tray menu or hotkeys to pause or stop.",
             QSystemTrayIcon.MessageIcon.Information,
             2500,
         )
 
     def _on_recording_finished(self, path: str, duration: float, frames: int):
         self._recorder = None
+        self._recording_rect = None
+        self._hide_recording_border()
+        self._set_recording_indicator(False)
         self._build_tray_menu()
         self._tray.showMessage(
             APP_NAME,
@@ -552,12 +648,41 @@ class ClearShotApp:
 
     def _on_recording_failed(self, message: str):
         self._recorder = None
+        self._recording_rect = None
+        self._hide_recording_border()
+        self._set_recording_indicator(False)
         self._build_tray_menu()
         QMessageBox.warning(
             None,
             "Recording Failed",
             f"ClearShot could not record the screen.\n\n{message}",
         )
+
+    def _on_recording_paused(self):
+        self._set_recording_indicator(True, True)
+        if self._record_border_overlay is not None:
+            self._record_border_overlay.set_paused(True)
+        self._build_tray_menu()
+
+    def _on_recording_resumed(self):
+        self._set_recording_indicator(True, False)
+        if self._record_border_overlay is not None:
+            self._record_border_overlay.set_paused(False)
+        self._build_tray_menu()
+
+    def _show_recording_border(self, rect: QRect) -> None:
+        self._hide_recording_border()
+        self._record_border_overlay = RecordingBorderOverlay(rect)
+        self._record_border_overlay.show()
+        self._record_border_overlay.raise_()
+
+    def _hide_recording_border(self) -> None:
+        if self._record_border_overlay is not None:
+            try:
+                self._record_border_overlay.close()
+            except RuntimeError:
+                pass
+            self._record_border_overlay = None
 
     def _show_recording_busy_message(self):
         self._tray.showMessage(
@@ -647,11 +772,14 @@ class ClearShotApp:
                 self._record_region_overlay.close()
             except RuntimeError:
                 pass
+        if self._record_border_overlay:
+            self._hide_recording_border()
         if self._recorder:
             try:
                 self._recorder.stop()
                 self._recorder.wait(5000)
             except RuntimeError:
                 pass
+        self._set_recording_indicator(False)
 
         QApplication.quit()

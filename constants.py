@@ -3,7 +3,7 @@
 import os
 
 APP_NAME = "ClearShot"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 APP_AUTHOR = "ClearShot"
 
 # Paths
@@ -18,6 +18,8 @@ MUTEX_NAME = "ClearShot_SingleInstance_Mutex"
 DEFAULT_HOTKEYS = {
     "region_capture": "print screen",
     "fullscreen_capture": "ctrl+print screen",
+    "recording_pause_resume": "ctrl+alt+shift+p",
+    "recording_stop": "ctrl+alt+shift+x",
 }
 
 # Image format options
@@ -25,6 +27,12 @@ IMAGE_FORMATS = {
     "PNG": ".png",
     "JPEG": ".jpg",
     "BMP": ".bmp",
+}
+
+# Screen recording format options
+VIDEO_FORMATS = {
+    "MP4": ".mp4",
+    "MKV": ".mkv",
 }
 
 # Annotation defaults

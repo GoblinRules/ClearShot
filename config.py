@@ -12,6 +12,8 @@ from constants import (
     DEFAULT_FONT_SIZE,
 )
 
+DEFAULT_RECORDING_SAVE_DIR = os.path.join(DEFAULT_SAVE_DIR, "Recordings")
+
 DEFAULT_SETTINGS = {
     "save_path": DEFAULT_SAVE_DIR,
     "image_format": "PNG",
@@ -24,7 +26,12 @@ DEFAULT_SETTINGS = {
     "font_size": DEFAULT_FONT_SIZE,
     "copy_to_clipboard_on_save": True,
     "show_magnifier": True,
+    "recording_save_path": DEFAULT_RECORDING_SAVE_DIR,
+    "recording_format": "MP4",
     "recording_fps": 15,
+    "show_recording_border": True,
+    "recording_audio_enabled": False,
+    "recording_audio_source": "",
     "play_sound": False,
 }
 
@@ -41,6 +48,7 @@ class Config:
         """Create required directories if they don't exist."""
         os.makedirs(APPDATA_DIR, exist_ok=True)
         os.makedirs(self.get("save_path", DEFAULT_SAVE_DIR), exist_ok=True)
+        os.makedirs(self.get("recording_save_path", DEFAULT_RECORDING_SAVE_DIR), exist_ok=True)
 
     def load(self):
         """Load settings from the JSON config file."""
