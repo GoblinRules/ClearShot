@@ -23,6 +23,7 @@ from recording import (
     AUDIO_MODE_SYSTEM,
     RecordingBorderOverlay,
     RecordingAnnotationOverlay,
+    RecordingAnnotationStore,
     RecordingSelectionOverlay,
     ScreenRecorder,
     SYSTEM_AUDIO_DEFAULT_DEVICE,
@@ -213,6 +214,7 @@ class ClearShotApp:
         self._record_region_overlay: RecordingSelectionOverlay | None = None
         self._record_border_overlay: RecordingBorderOverlay | None = None
         self._record_annotation_overlay: RecordingAnnotationOverlay | None = None
+        self._record_annotation_store: RecordingAnnotationStore | None = None
         self._recorder: ScreenRecorder | None = None
         self._recording_rect: QRect | None = None
 
@@ -627,6 +629,7 @@ class ClearShotApp:
             ).strip() or SYSTEM_AUDIO_DEFAULT_DEVICE
 
         self._recording_rect = normalize_recording_rect(rect)
+        self._record_annotation_store = RecordingAnnotationStore()
         self._recorder = ScreenRecorder(
             self._recording_rect,
             output_path,
@@ -634,6 +637,7 @@ class ClearShotApp:
             audio_mode=audio_mode,
             microphone_source=microphone_source,
             system_audio_device=system_audio_device,
+            annotation_store=self._record_annotation_store,
         )
         self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
         self._recorder.recording_finished.connect(self._on_recording_finished)
@@ -682,6 +686,7 @@ class ClearShotApp:
         self._recorder = None
         self._recording_rect = None
         self._hide_recording_annotations()
+        self._record_annotation_store = None
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
@@ -696,6 +701,7 @@ class ClearShotApp:
         self._recorder = None
         self._recording_rect = None
         self._hide_recording_annotations()
+        self._record_annotation_store = None
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
@@ -741,13 +747,13 @@ class ClearShotApp:
         self._build_tray_menu()
 
     def _show_recording_annotations(self, rect: QRect) -> None:
+        if self._record_annotation_store is None:
+            self._record_annotation_store = RecordingAnnotationStore()
         if self._record_annotation_overlay is None:
-            self._record_annotation_overlay = RecordingAnnotationOverlay(rect)
+            self._record_annotation_overlay = RecordingAnnotationOverlay(rect, self._record_annotation_store)
         self._record_annotation_overlay.show()
         self._record_annotation_overlay.raise_()
         self._record_annotation_overlay.activateWindow()
-        if self._record_border_overlay is not None:
-            self._record_border_overlay.raise_()
 
     def _hide_recording_annotations(self) -> None:
         if self._record_annotation_overlay is not None:
@@ -758,6 +764,8 @@ class ClearShotApp:
             self._record_annotation_overlay = None
 
     def _clear_recording_annotations(self) -> None:
+        if self._record_annotation_store is not None:
+            self._record_annotation_store.clear()
         if self._record_annotation_overlay is not None:
             self._record_annotation_overlay.clear_all()
 
@@ -851,6 +859,7 @@ class ClearShotApp:
                 pass
         if self._record_annotation_overlay:
             self._hide_recording_annotations()
+        self._record_annotation_store = None
         if self._record_border_overlay:
             self._hide_recording_border()
         if self._recorder:

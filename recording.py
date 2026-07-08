@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import ctypes
 import os
 import re
 import subprocess
@@ -15,7 +16,7 @@ from threading import Event
 import imageio_ffmpeg
 import mss
 from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QColorDialog,
@@ -47,13 +48,38 @@ from constants import (
     TOOL_TEXT,
 )
 from icon_utils import ui_icon
-from tools import CounterItem, PenItem, TextItem, create_tool_item
+from tools import (
+    ArrowItem,
+    CounterItem,
+    EllipseItem,
+    FilledRectItem,
+    LineItem,
+    PenItem,
+    RectItem,
+    TextItem,
+    create_tool_item,
+)
 
 
 AUDIO_MODE_NONE = "none"
 AUDIO_MODE_MICROPHONE = "microphone"
 AUDIO_MODE_SYSTEM = "system"
 SYSTEM_AUDIO_DEFAULT_DEVICE = "__default__"
+WDA_MONITOR = 0x00000001
+WDA_EXCLUDEFROMCAPTURE = 0x00000011
+
+
+def exclude_widget_from_capture(widget: QWidget) -> None:
+    """Ask Windows not to include a top-level widget in screen captures."""
+    if os.name != "nt":
+        return
+    try:
+        hwnd = int(widget.winId())
+        user32 = ctypes.windll.user32
+        if not user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE):
+            user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
+    except Exception:
+        pass
 
 
 def make_recording_path(
@@ -194,6 +220,74 @@ def _resolve_system_speaker(device_id: str | None):
     raise RuntimeError("Selected system audio output device was not found.")
 
 
+def _clone_annotation_item(item):
+    clone = type(item)(color=item.color, width=item.width)
+    if isinstance(item, PenItem):
+        clone.points = [QPointF(point) for point in item.points]
+    elif isinstance(item, (LineItem, ArrowItem, RectItem, FilledRectItem, EllipseItem)):
+        clone.start = QPointF(item.start)
+        clone.end = QPointF(item.end)
+    elif isinstance(item, TextItem):
+        clone.position = QPointF(item.position)
+        clone.text = item.text
+        clone.font_size = item.font_size
+        clone.font_family = item.font_family
+    elif isinstance(item, CounterItem):
+        clone.position = QPointF(item.position)
+        clone.number = item.number
+        clone.radius = item.radius
+    return clone
+
+
+def _qimage_rgb_bytes(image: QImage) -> bytes:
+    image = image.convertToFormat(QImage.Format.Format_RGB888)
+    width = image.width()
+    height = image.height()
+    row_bytes = width * 3
+    bytes_per_line = image.bytesPerLine()
+    bits = image.bits()
+    bits.setsize(image.sizeInBytes())
+    raw = memoryview(bits)
+    if bytes_per_line == row_bytes:
+        return bytes(raw[:row_bytes * height])
+
+    packed = bytearray(row_bytes * height)
+    for y in range(height):
+        src_start = y * bytes_per_line
+        src_end = src_start + row_bytes
+        dst_start = y * row_bytes
+        packed[dst_start:dst_start + row_bytes] = raw[src_start:src_end]
+    return bytes(packed)
+
+
+class RecordingAnnotationStore:
+    """Thread-safe live annotation snapshot for video-frame compositing."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._items = []
+
+    def set_items(self, items) -> None:
+        with self._lock:
+            self._items = [_clone_annotation_item(item) for item in items]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items = []
+
+    def snapshot(self):
+        with self._lock:
+            return [_clone_annotation_item(item) for item in self._items]
+
+    def has_items(self) -> bool:
+        with self._lock:
+            return bool(self._items)
+
+    def render(self, painter: QPainter) -> None:
+        for item in self.snapshot():
+            item.render(painter)
+
+
 class _SystemAudioRecorder(threading.Thread):
     """Record Windows output-loopback audio to a temporary WAV file."""
 
@@ -273,6 +367,7 @@ class ScreenRecorder(QThread):
         audio_mode: str = AUDIO_MODE_NONE,
         microphone_source: str | None = None,
         system_audio_device: str | None = None,
+        annotation_store: RecordingAnnotationStore | None = None,
     ):
         super().__init__()
         self._rect = normalize_recording_rect(rect)
@@ -281,6 +376,7 @@ class ScreenRecorder(QThread):
         self._audio_mode = audio_mode or AUDIO_MODE_NONE
         self._microphone_source = (microphone_source or "").strip()
         self._system_audio_device = (system_audio_device or SYSTEM_AUDIO_DEFAULT_DEVICE).strip()
+        self._annotation_store = annotation_store
         self._stop_event = Event()
         self._pause_event = Event()
         self._last_error = ""
@@ -352,7 +448,8 @@ class ScreenRecorder(QThread):
                     continue
 
                 screenshot = sct.grab(region)
-                send_frame(screenshot.rgb)
+                frame = self._compose_annotation_frame(screenshot.rgb)
+                send_frame(frame)
                 frames += 1
 
                 next_frame_at += frame_interval
@@ -362,6 +459,19 @@ class ScreenRecorder(QThread):
                 else:
                     next_frame_at = time.perf_counter()
         return frames
+
+    def _compose_annotation_frame(self, rgb_data: bytes) -> bytes:
+        if self._annotation_store is None or not self._annotation_store.has_items():
+            return rgb_data
+
+        width = self._rect.width()
+        height = self._rect.height()
+        image = QImage(rgb_data, width, height, width * 3, QImage.Format.Format_RGB888).copy()
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._annotation_store.render(painter)
+        painter.end()
+        return _qimage_rgb_bytes(image)
 
     def _run_silent(self, output_path: str | None = None) -> int:
         target_path = output_path or self._output_path
@@ -589,6 +699,10 @@ class RecordingBorderOverlay(QWidget):
         self._paused = paused
         self.update()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        exclude_widget_from_capture(self)
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -631,10 +745,12 @@ class RecordingBorderOverlay(QWidget):
 class RecordingAnnotationCanvas(QWidget):
     """Transparent live-annotation canvas for active screen recordings."""
 
-    def __init__(self, parent=None):
+    def __init__(self, store: RecordingAnnotationStore, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setMouseTracking(True)
+        self._store = store
 
         self._items = []
         self._current_item = None
@@ -650,12 +766,14 @@ class RecordingAnnotationCanvas(QWidget):
         item = self._items.pop()
         if isinstance(item, CounterItem):
             self._counter_value = max(1, self._counter_value - 1)
+        self._sync_store()
         self.update()
 
     def clear_all(self) -> None:
         self._items.clear()
         self._current_item = None
         self._counter_value = 1
+        self._sync_store()
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -682,6 +800,7 @@ class RecordingAnnotationCanvas(QWidget):
             item.number = self._counter_value
             self._counter_value += 1
             self._items.append(item)
+            self._sync_store()
             self.update()
             return
 
@@ -702,6 +821,7 @@ class RecordingAnnotationCanvas(QWidget):
             self._current_item.add_point(pos)
         elif hasattr(self._current_item, "end"):
             self._current_item.end = pos
+        self._sync_store()
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:
@@ -711,6 +831,7 @@ class RecordingAnnotationCanvas(QWidget):
             return
         self._items.append(self._current_item)
         self._current_item = None
+        self._sync_store()
         self.update()
 
     def _place_text(self, pos: QPointF) -> None:
@@ -722,25 +843,34 @@ class RecordingAnnotationCanvas(QWidget):
         item.text = text
         item.font_size = self.font_size
         self._items.append(item)
+        self._sync_store()
         self.update()
+
+    def _sync_store(self) -> None:
+        items = list(self._items)
+        if self._current_item is not None:
+            items.append(self._current_item)
+        self._store.set_items(items)
 
 
 class RecordingAnnotationOverlay(QWidget):
     """Topmost drawing surface for annotations captured in active recordings."""
 
-    def __init__(self, rect: QRect, parent=None):
+    def __init__(self, rect: QRect, store: RecordingAnnotationStore, parent=None):
         super().__init__(parent)
         self._record_rect = normalize_recording_rect(rect)
+        self._store = store
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setGeometry(self._record_rect)
 
-        self._canvas = RecordingAnnotationCanvas(self)
+        self._canvas = RecordingAnnotationCanvas(self._store, self)
         self._canvas.setGeometry(self.rect())
         self._toolbar = self._create_toolbar()
         self._toolbar.setParent(self)
@@ -752,6 +882,10 @@ class RecordingAnnotationOverlay(QWidget):
 
     def undo(self) -> None:
         self._canvas.undo()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        exclude_widget_from_capture(self)
 
     def resizeEvent(self, event) -> None:
         self._canvas.setGeometry(self.rect())
