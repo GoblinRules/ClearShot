@@ -983,6 +983,12 @@ class RecordingAnnotationOverlay(QWidget):
         self._toolbar.raise_()
         super().resizeEvent(event)
 
+    def paintEvent(self, event) -> None:
+        if self._draw_input_active:
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+            painter.end()
+
     def nativeEvent(self, event_type, message):
         if os.name == "nt" and self._draw_input_active is False:
             try:
@@ -1002,7 +1008,8 @@ class RecordingAnnotationOverlay(QWidget):
             return
         self._draw_input_active = active
         self._canvas.set_drawing_enabled(active)
-        self.update()
+        self.repaint()
+        self._canvas.repaint()
         if active:
             self.raise_()
 

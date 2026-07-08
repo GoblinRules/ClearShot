@@ -1,16 +1,22 @@
-# ClearShot v1.3.3
+# ClearShot v1.3.4
 
 ## Fixed
 
-- Removed the installer agreement page that could block installation before the Next button became available.
-- Kept the license and third-party notices bundled in the install directory without requiring a click-through step.
+- Removed the installer Additional Tasks page after reports that it could render as an empty focus box and block normal mouse use.
+- The installer now closes any running ClearShot process at startup before showing the wizard, preventing old tray overlays from interfering with setup.
+- Desktop shortcut creation is now direct and no longer depends on the removed task page.
+- Fixed live recording annotations not receiving real mouse input on the transparent drawing surface.
+
+## Changed
+
+- Start with Windows is managed from ClearShot Settings instead of the installer wizard.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.3.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.3.4.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 

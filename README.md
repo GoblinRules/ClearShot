@@ -68,7 +68,7 @@
 
 1. Go to the [Releases](https://github.com/GoblinRules/ClearShot/releases) page
 2. Download `ClearShot.exe` for the portable app, or `ClearShot_Setup_<version>.exe` for the full installer
-3. Run the portable app directly, or install it with Start Menu, desktop shortcut, and startup options
+3. Run the portable app directly, or install it with Start Menu and desktop shortcuts
 
 ### Option 2: Run from Source
 
