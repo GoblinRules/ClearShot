@@ -7,6 +7,7 @@ from constants import (
     CONFIG_FILE,
     DEFAULT_SAVE_DIR,
     DEFAULT_HOTKEYS,
+    DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
     DEFAULT_PEN_COLOR,
     DEFAULT_PEN_WIDTH,
     DEFAULT_FONT_SIZE,
@@ -35,6 +36,7 @@ DEFAULT_SETTINGS = {
     "recording_audio_source": "",
     "recording_microphone_source": "",
     "recording_system_audio_device": "__default__",
+    "recording_annotation_hold_key": DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
     "play_sound": False,
 }
 

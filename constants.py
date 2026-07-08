@@ -3,7 +3,7 @@
 import os
 
 APP_NAME = "ClearShot"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 APP_AUTHOR = "ClearShot"
 
 # Paths
@@ -21,6 +21,7 @@ DEFAULT_HOTKEYS = {
     "recording_pause_resume": "ctrl+alt+shift+p",
     "recording_stop": "ctrl+alt+shift+x",
 }
+DEFAULT_RECORDING_ANNOTATION_HOLD_KEY = "ctrl+alt"
 
 # Image format options
 IMAGE_FORMATS = {

@@ -16,7 +16,13 @@ from icon_utils import ui_icon
 from capture import capture_all_monitors, capture_region, get_monitor_list, ensure_dpi_awareness
 from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
-from constants import APP_NAME, APP_VERSION, DEFAULT_SAVE_DIR, VIDEO_FORMATS
+from constants import (
+    APP_NAME,
+    APP_VERSION,
+    DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
+    DEFAULT_SAVE_DIR,
+    VIDEO_FORMATS,
+)
 from recording import (
     AUDIO_MODE_MICROPHONE,
     AUDIO_MODE_NONE,
@@ -749,11 +755,27 @@ class ClearShotApp:
     def _show_recording_annotations(self, rect: QRect) -> None:
         if self._record_annotation_store is None:
             self._record_annotation_store = RecordingAnnotationStore()
+        hold_key = self._recording_annotation_hold_key()
         if self._record_annotation_overlay is None:
-            self._record_annotation_overlay = RecordingAnnotationOverlay(rect, self._record_annotation_store)
+            self._record_annotation_overlay = RecordingAnnotationOverlay(
+                rect,
+                self._record_annotation_store,
+                hold_key=hold_key,
+            )
+        else:
+            self._record_annotation_overlay.set_hold_key(hold_key)
         self._record_annotation_overlay.show()
         self._record_annotation_overlay.raise_()
         self._record_annotation_overlay.activateWindow()
+
+    def _recording_annotation_hold_key(self) -> str:
+        return str(
+            self._config.get(
+                "recording_annotation_hold_key",
+                DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
+            )
+            or ""
+        ).strip()
 
     def _hide_recording_annotations(self) -> None:
         if self._record_annotation_overlay is not None:
@@ -829,6 +851,8 @@ class ClearShotApp:
     def _on_settings_changed(self):
         """Re-register hotkeys when settings change."""
         self._hotkey_thread.refresh_hotkeys()
+        if self._record_annotation_overlay is not None:
+            self._record_annotation_overlay.set_hold_key(self._recording_annotation_hold_key())
 
 
 

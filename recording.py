@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import ctypes
+import ctypes.wintypes as wintypes
 import os
 import re
 import subprocess
@@ -37,6 +38,7 @@ from constants import (
     DEFAULT_FONT_SIZE,
     DEFAULT_PEN_COLOR,
     DEFAULT_PEN_WIDTH,
+    DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
     DEFAULT_SAVE_DIR,
     TOOL_ARROW,
     TOOL_COUNTER,
@@ -67,6 +69,20 @@ AUDIO_MODE_SYSTEM = "system"
 SYSTEM_AUDIO_DEFAULT_DEVICE = "__default__"
 WDA_MONITOR = 0x00000001
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
+WM_NCHITTEST = 0x0084
+HTTRANSPARENT = -1
+_ANNOTATION_HOLD_KEY_VKS = {
+    "shift": 0x10,
+    "ctrl": 0x11,
+    "control": 0x11,
+    "alt": 0x12,
+}
+_ANNOTATION_HOLD_KEY_LABELS = {
+    "shift": "Shift",
+    "ctrl": "Ctrl",
+    "control": "Ctrl",
+    "alt": "Alt",
+}
 
 
 def exclude_widget_from_capture(widget: QWidget) -> None:
@@ -80,6 +96,42 @@ def exclude_widget_from_capture(widget: QWidget) -> None:
             user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
     except Exception:
         pass
+
+
+def normalize_annotation_hold_key(combo: str | None) -> str:
+    raw = str(combo or "").strip().lower()
+    if not raw or raw in {"always", "none", "off"}:
+        return ""
+
+    requested = {part.strip() for part in raw.split("+") if part.strip()}
+    if not requested or any(part not in _ANNOTATION_HOLD_KEY_VKS for part in requested):
+        return DEFAULT_RECORDING_ANNOTATION_HOLD_KEY
+
+    ordered = [part for part in ("ctrl", "alt", "shift") if part in requested or ("control" in requested and part == "ctrl")]
+    return "+".join(ordered)
+
+
+def format_annotation_hold_key(combo: str | None) -> str:
+    normalized = normalize_annotation_hold_key(combo)
+    if not normalized:
+        return "Always active"
+    return " + ".join(_ANNOTATION_HOLD_KEY_LABELS[part] for part in normalized.split("+"))
+
+
+def annotation_hold_key_is_pressed(combo: str | None) -> bool:
+    normalized = normalize_annotation_hold_key(combo)
+    if not normalized:
+        return True
+    if os.name != "nt":
+        return True
+    try:
+        user32 = ctypes.windll.user32
+        return all(
+            user32.GetAsyncKeyState(_ANNOTATION_HOLD_KEY_VKS[part]) & 0x8000
+            for part in normalized.split("+")
+        )
+    except Exception:
+        return True
 
 
 def make_recording_path(
@@ -754,11 +806,21 @@ class RecordingAnnotationCanvas(QWidget):
 
         self._items = []
         self._current_item = None
+        self._drawing_enabled = True
         self.current_tool = TOOL_PEN
         self.current_color = DEFAULT_PEN_COLOR
         self.current_width = DEFAULT_PEN_WIDTH
         self.font_size = DEFAULT_FONT_SIZE
         self._counter_value = 1
+
+    def set_drawing_enabled(self, enabled: bool) -> None:
+        if self._drawing_enabled == enabled:
+            return
+        self._drawing_enabled = enabled
+        self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
+
+    def is_drawing(self) -> bool:
+        return self._current_item is not None
 
     def undo(self) -> None:
         if not self._items:
@@ -786,6 +848,9 @@ class RecordingAnnotationCanvas(QWidget):
         painter.end()
 
     def mousePressEvent(self, event) -> None:
+        if not self._drawing_enabled:
+            event.ignore()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
@@ -813,6 +878,9 @@ class RecordingAnnotationCanvas(QWidget):
         self._current_item = item
 
     def mouseMoveEvent(self, event) -> None:
+        if not self._drawing_enabled:
+            event.ignore()
+            return
         if self._current_item is None:
             return
 
@@ -825,6 +893,9 @@ class RecordingAnnotationCanvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:
+        if not self._drawing_enabled:
+            event.ignore()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self._current_item is None:
@@ -856,10 +927,18 @@ class RecordingAnnotationCanvas(QWidget):
 class RecordingAnnotationOverlay(QWidget):
     """Topmost drawing surface for annotations captured in active recordings."""
 
-    def __init__(self, rect: QRect, store: RecordingAnnotationStore, parent=None):
+    def __init__(
+        self,
+        rect: QRect,
+        store: RecordingAnnotationStore,
+        hold_key: str | None = DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
+        parent=None,
+    ):
         super().__init__(parent)
         self._record_rect = normalize_recording_rect(rect)
         self._store = store
+        self._hold_key = normalize_annotation_hold_key(hold_key)
+        self._draw_input_active: bool | None = None
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -876,6 +955,12 @@ class RecordingAnnotationOverlay(QWidget):
         self._toolbar.setParent(self)
         self._toolbar.move(8, 8)
         self._toolbar.raise_()
+        self._refresh_toolbar_hint()
+
+        self._input_timer = QTimer(self)
+        self._input_timer.setInterval(30)
+        self._input_timer.timeout.connect(self._refresh_input_mode)
+        self._input_timer.start()
 
     def clear_all(self) -> None:
         self._canvas.clear_all()
@@ -883,14 +968,50 @@ class RecordingAnnotationOverlay(QWidget):
     def undo(self) -> None:
         self._canvas.undo()
 
+    def set_hold_key(self, hold_key: str | None) -> None:
+        self._hold_key = normalize_annotation_hold_key(hold_key)
+        self._refresh_toolbar_hint()
+        self._refresh_input_mode(force=True)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         exclude_widget_from_capture(self)
+        self._refresh_input_mode(force=True)
 
     def resizeEvent(self, event) -> None:
         self._canvas.setGeometry(self.rect())
         self._toolbar.raise_()
         super().resizeEvent(event)
+
+    def nativeEvent(self, event_type, message):
+        if os.name == "nt" and self._draw_input_active is False:
+            try:
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == WM_NCHITTEST:
+                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    if not self._toolbar.geometry().contains(self.mapFromGlobal(QPoint(x, y))):
+                        return True, HTTRANSPARENT
+            except Exception:
+                pass
+        return False, 0
+
+    def _refresh_input_mode(self, force: bool = False) -> None:
+        active = annotation_hold_key_is_pressed(self._hold_key) or self._canvas.is_drawing()
+        if not force and active == self._draw_input_active:
+            return
+        self._draw_input_active = active
+        self._canvas.set_drawing_enabled(active)
+        self.update()
+        if active:
+            self.raise_()
+
+    def _refresh_toolbar_hint(self) -> None:
+        hold_label = format_annotation_hold_key(self._hold_key)
+        if self._hold_key:
+            self._toolbar.setToolTip(f"Hold {hold_label} and drag to annotate")
+        else:
+            self._toolbar.setToolTip("Annotation drawing is always active")
 
     def keyPressEvent(self, event) -> None:
         key = event.key()

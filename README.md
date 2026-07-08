@@ -106,7 +106,7 @@ Right-click the tray icon and open **Screen Record**:
 - **Record Region** - Drag to select an area, then recording starts
 - **Record All Monitors** - Record the full virtual desktop
 - **Record Monitor** - Pick a specific display
-- **Show Annotation Tools** - Draw pen strokes, arrows, shapes, text, and numbered markers into the live recording
+- **Show Annotation Tools** - Hold the configured annotation input key to draw pen strokes, arrows, shapes, text, and numbered markers into the live recording
 - **Pause Recording / Resume Recording** - Temporarily pause and continue the active recording
 - **Stop Recording** - Finish and save the recording to your configured recording folder
 
@@ -117,7 +117,7 @@ Default recording hotkeys:
 | **Pause/Resume Recording** | `Ctrl + Alt + Shift + P` |
 | **Stop Recording** | `Ctrl + Alt + Shift + X` |
 
-Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, microphone input, and system audio from a selected output device.
+Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, hold-to-draw annotation input, microphone input, and system audio from a selected output device.
 
 ### Region Capture
 

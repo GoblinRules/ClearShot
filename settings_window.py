@@ -18,7 +18,14 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit, QSpacerItem, QSizePolicy, QFrame,
     QScrollArea,
 )
-from constants import APP_NAME, APP_VERSION, DEFAULT_HOTKEYS, IMAGE_FORMATS, VIDEO_FORMATS
+from constants import (
+    APP_NAME,
+    APP_VERSION,
+    DEFAULT_HOTKEYS,
+    DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
+    IMAGE_FORMATS,
+    VIDEO_FORMATS,
+)
 from icon_utils import ui_icon
 from recording import (
     AUDIO_MODE_MICROPHONE,
@@ -308,6 +315,16 @@ class SettingsWindow(QDialog):
         self._show_recording_border_cb = QCheckBox("Show a border around the recording area")
         recording_layout.addRow("", self._show_recording_border_cb)
 
+        self._recording_annotation_hold_combo = QComboBox()
+        self._recording_annotation_hold_combo.addItem("Hold Ctrl + Alt to draw", "ctrl+alt")
+        self._recording_annotation_hold_combo.addItem("Hold Ctrl + Shift to draw", "ctrl+shift")
+        self._recording_annotation_hold_combo.addItem("Hold Alt + Shift to draw", "alt+shift")
+        self._recording_annotation_hold_combo.addItem("Hold Shift to draw", "shift")
+        self._recording_annotation_hold_combo.addItem("Hold Ctrl to draw", "ctrl")
+        self._recording_annotation_hold_combo.addItem("Hold Alt to draw", "alt")
+        self._recording_annotation_hold_combo.addItem("Always draw while tools are visible", "")
+        recording_layout.addRow("Annotation input:", self._recording_annotation_hold_combo)
+
         self._recording_audio_mode_combo = QComboBox()
         self._recording_audio_mode_combo.addItem("No audio", AUDIO_MODE_NONE)
         self._recording_audio_mode_combo.addItem("Microphone input", AUDIO_MODE_MICROPHONE)
@@ -461,7 +478,7 @@ class SettingsWindow(QDialog):
         <ol style="color: #ccc; margin-left: 8px;">
           <li>Right-click the tray icon and open <b>Screen Record</b></li>
           <li>Choose <b>Record Region</b>, <b>Record All Monitors</b>, or a specific monitor</li>
-          <li>Use <b>Show Annotation Tools</b> while recording to draw pen, arrows, shapes, text, and numbered markers into the video</li>
+          <li>Use <b>Show Annotation Tools</b> while recording, then hold your configured annotation input key while drawing pen, arrows, shapes, text, and numbered markers into the video</li>
           <li>Use <b>Pause Recording</b>, <b>Resume Recording</b>, or <b>Stop Recording</b> from the tray menu</li>
         </ol>
         <table cellpadding="6" style="margin-left: 8px;">
@@ -470,7 +487,7 @@ class SettingsWindow(QDialog):
           <tr><td style="color: #ccc;"><b>Stop Recording</b></td>
               <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Alt + Shift + X</code></td></tr>
         </table>
-        <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, microphone input, or system audio from a selected output device.</p>
+        <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, hold-to-draw annotation input, microphone input, or system audio from a selected output device.</p>
 
         <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
@@ -619,6 +636,12 @@ class SettingsWindow(QDialog):
         if fps_idx >= 0:
             self._recording_fps_combo.setCurrentIndex(fps_idx)
         self._show_recording_border_cb.setChecked(self._config.get("show_recording_border", True))
+        hold_key = self._config.get("recording_annotation_hold_key", DEFAULT_RECORDING_ANNOTATION_HOLD_KEY)
+        hold_idx = self._recording_annotation_hold_combo.findData(hold_key)
+        if hold_idx < 0:
+            hold_idx = self._recording_annotation_hold_combo.findData(DEFAULT_RECORDING_ANNOTATION_HOLD_KEY)
+        if hold_idx >= 0:
+            self._recording_annotation_hold_combo.setCurrentIndex(hold_idx)
         audio_mode = self._config.get("recording_audio_mode", "")
         if not audio_mode:
             audio_mode = AUDIO_MODE_MICROPHONE if self._config.get("recording_audio_enabled", False) else AUDIO_MODE_NONE
@@ -676,6 +699,7 @@ class SettingsWindow(QDialog):
         self._config.set("recording_format", self._recording_format_combo.currentText())
         self._config.set("recording_fps", int(self._recording_fps_combo.currentText()))
         self._config.set("show_recording_border", self._show_recording_border_cb.isChecked())
+        self._config.set("recording_annotation_hold_key", self._recording_annotation_hold_combo.currentData() or "")
         audio_mode = self._recording_audio_mode_combo.currentData() or AUDIO_MODE_NONE
         microphone_source = self._recording_audio_source_combo.currentText().strip()
         system_audio_device = self._recording_system_audio_combo.currentData() or SYSTEM_AUDIO_DEFAULT_DEVICE
