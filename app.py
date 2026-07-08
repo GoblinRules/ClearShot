@@ -4,7 +4,7 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QRect, Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox,
@@ -16,7 +16,13 @@ from icon_utils import ui_icon
 from capture import capture_all_monitors, capture_region, get_monitor_list, ensure_dpi_awareness
 from clipboard_utils import copy_pixmap_to_clipboard
 from settings_window import SettingsWindow
-from constants import APP_NAME, APP_VERSION
+from constants import APP_NAME, APP_VERSION, DEFAULT_SAVE_DIR
+from recording import (
+    RecordingSelectionOverlay,
+    ScreenRecorder,
+    make_recording_path,
+    normalize_recording_rect,
+)
 
 # ── Win32 constants for RegisterHotKey ────────────────────────────────
 MOD_ALT = 0x0001
@@ -189,6 +195,8 @@ class ClearShotApp:
         self._overlay: SelectionOverlay | None = None
         self._annotator: AnnotatorWindow | None = None
         self._settings_window: SettingsWindow | None = None
+        self._record_region_overlay: RecordingSelectionOverlay | None = None
+        self._recorder: ScreenRecorder | None = None
 
         # Ensure DPI awareness
         ensure_dpi_awareness()
@@ -351,6 +359,32 @@ class ClearShotApp:
 
         menu.addSeparator()
 
+        record_menu = menu.addMenu(ui_icon("record"), "Screen Record")
+        record_menu.setStyleSheet(menu.styleSheet())
+
+        if self._is_recording():
+            stop_action = QAction(ui_icon("stop"), "Stop Recording", record_menu)
+            stop_action.triggered.connect(self._stop_recording)
+            record_menu.addAction(stop_action)
+        else:
+            record_region_action = QAction(ui_icon("capture_region"), "Record Region", record_menu)
+            record_region_action.triggered.connect(self._start_region_recording)
+            record_menu.addAction(record_region_action)
+
+            record_all_action = QAction(ui_icon("video"), "Record All Monitors", record_menu)
+            record_all_action.triggered.connect(lambda: self._start_fullscreen_recording(-1))
+            record_menu.addAction(record_all_action)
+
+            record_monitor_menu = record_menu.addMenu(ui_icon("monitor"), "Record Monitor")
+            record_monitor_menu.setStyleSheet(menu.styleSheet())
+            for idx, mon_rect in enumerate(monitors):
+                label = f"Monitor {idx + 1}  ({mon_rect.width()}Ã—{mon_rect.height()})"
+                rec_mon_action = QAction(ui_icon("monitor"), label, record_monitor_menu)
+                rec_mon_action.triggered.connect(lambda checked, i=idx: self._start_fullscreen_recording(i))
+                record_monitor_menu.addAction(rec_mon_action)
+
+        menu.addSeparator()
+
         # Open Save Folder
         folder_action = QAction(ui_icon("folder"), "Open Save Folder", menu)
         folder_action.triggered.connect(self._open_save_folder)
@@ -376,6 +410,9 @@ class ClearShotApp:
         menu.addAction(exit_action)
 
         self._tray.setContextMenu(menu)
+
+    def _is_recording(self) -> bool:
+        return self._recorder is not None and self._recorder.isRunning()
 
     def _on_tray_activated(self, reason):
         """Handle tray icon click."""
@@ -420,6 +457,115 @@ class ClearShotApp:
             else:
                 pixmap, _ = capture_all_monitors()
         self._open_annotator(pixmap)
+
+    def _start_region_recording(self):
+        """Ask the user for a recording region, then start recording it."""
+        if self._is_recording():
+            self._show_recording_busy_message()
+            return
+
+        if self._record_region_overlay is not None:
+            try:
+                self._record_region_overlay.close()
+            except RuntimeError:
+                pass
+
+        self._record_region_overlay = RecordingSelectionOverlay()
+        self._record_region_overlay.region_selected.connect(self._on_record_region_selected)
+        self._record_region_overlay.cancelled.connect(self._on_record_region_cancelled)
+        QTimer.singleShot(150, self._record_region_overlay.begin_selection)
+
+    def _on_record_region_selected(self, rect: QRect):
+        self._record_region_overlay = None
+        QTimer.singleShot(250, lambda r=QRect(rect): self._start_recording_rect(r, "region"))
+
+    def _on_record_region_cancelled(self):
+        self._record_region_overlay = None
+
+    def _start_fullscreen_recording(self, monitor_index: int = -1):
+        """Start recording all monitors or one physical monitor."""
+        if self._is_recording():
+            self._show_recording_busy_message()
+            return
+
+        monitors = get_monitor_list()
+        if monitor_index < 0:
+            pixmap, monitor = capture_all_monitors()
+            rect = QRect(monitor["left"], monitor["top"], pixmap.width(), pixmap.height())
+            label = "all monitors"
+        elif monitor_index < len(monitors):
+            rect = QRect(monitors[monitor_index])
+            label = f"monitor {monitor_index + 1}"
+        else:
+            pixmap, monitor = capture_all_monitors()
+            rect = QRect(monitor["left"], monitor["top"], pixmap.width(), pixmap.height())
+            label = "all monitors"
+
+        QTimer.singleShot(250, lambda r=QRect(rect), name=label: self._start_recording_rect(r, name))
+
+    def _start_recording_rect(self, rect: QRect, label: str):
+        """Start a background MP4 recording for the given screen rectangle."""
+        if self._is_recording():
+            self._show_recording_busy_message()
+            return
+
+        save_path = self._config.get("save_path", DEFAULT_SAVE_DIR)
+        pattern = self._config.get("filename_pattern", "ClearShot_{timestamp}")
+        output_path = make_recording_path(save_path, f"{pattern}_Recording")
+        fps = int(self._config.get("recording_fps", 15))
+
+        self._recorder = ScreenRecorder(normalize_recording_rect(rect), output_path, fps)
+        self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
+        self._recorder.recording_finished.connect(self._on_recording_finished)
+        self._recorder.recording_failed.connect(self._on_recording_failed)
+        self._recorder.finished.connect(self._build_tray_menu)
+        self._recorder.start()
+        self._build_tray_menu()
+
+    def _stop_recording(self):
+        if self._recorder is not None and self._recorder.isRunning():
+            self._recorder.stop()
+            self._tray.showMessage(
+                APP_NAME,
+                "Stopping screen recording...",
+                QSystemTrayIcon.MessageIcon.Information,
+                1500,
+            )
+
+    def _on_recording_started(self, path: str, target: str):
+        self._tray.showMessage(
+            APP_NAME,
+            f"Recording {target}. Use the tray menu to stop.",
+            QSystemTrayIcon.MessageIcon.Information,
+            2500,
+        )
+
+    def _on_recording_finished(self, path: str, duration: float, frames: int):
+        self._recorder = None
+        self._build_tray_menu()
+        self._tray.showMessage(
+            APP_NAME,
+            f"Recording saved: {os.path.basename(path)}",
+            QSystemTrayIcon.MessageIcon.Information,
+            3000,
+        )
+
+    def _on_recording_failed(self, message: str):
+        self._recorder = None
+        self._build_tray_menu()
+        QMessageBox.warning(
+            None,
+            "Recording Failed",
+            f"ClearShot could not record the screen.\n\n{message}",
+        )
+
+    def _show_recording_busy_message(self):
+        self._tray.showMessage(
+            APP_NAME,
+            "A screen recording is already running.",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000,
+        )
 
     def _on_region_selected(self, pixmap: QPixmap):
         """Handle a selected region from the overlay."""
@@ -494,6 +640,17 @@ class ClearShotApp:
         if self._settings_window:
             try:
                 self._settings_window.close()
+            except RuntimeError:
+                pass
+        if self._record_region_overlay:
+            try:
+                self._record_region_overlay.close()
+            except RuntimeError:
+                pass
+        if self._recorder:
+            try:
+                self._recorder.stop()
+                self._recorder.wait(5000)
             except RuntimeError:
                 pass
 

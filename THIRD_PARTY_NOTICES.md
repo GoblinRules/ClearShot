@@ -21,3 +21,16 @@ Icons and fonts are distributed under the Apache License 2.0:
 https://www.apache.org/licenses/LICENSE-2.0
 
 Code in the icon packages is distributed under the MIT license.
+
+## imageio-ffmpeg
+
+ClearShot uses imageio-ffmpeg to write MP4 screen recordings.
+
+- Project: imageio-ffmpeg
+- Version: 0.6.0
+- Repository: https://github.com/imageio/imageio-ffmpeg
+- License: BSD-2-Clause
+
+The Windows wheel includes an ffmpeg executable used for video encoding.
+FFmpeg is available from https://ffmpeg.org/ and is distributed under its
+own licensing terms.

@@ -8,22 +8,24 @@ block_cipher = None
 
 # Collect PyQt6 properly
 pyqt6_datas, pyqt6_binaries, pyqt6_hiddenimports = collect_all('PyQt6')
+ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all('imageio_ffmpeg')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=pyqt6_binaries,
+    binaries=pyqt6_binaries + ffmpeg_binaries,
     datas=[
         ('assets', 'assets'),
         ('resources', 'resources'),
         ('THIRD_PARTY_NOTICES.md', '.'),
-    ] + pyqt6_datas,
+    ] + pyqt6_datas + ffmpeg_datas,
     hiddenimports=[
         'win32clipboard',
         'win32con',
         'pywintypes',
         'mss',
-    ] + pyqt6_hiddenimports,
+        'imageio_ffmpeg',
+    ] + pyqt6_hiddenimports + ffmpeg_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

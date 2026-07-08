@@ -275,6 +275,15 @@ class SettingsWindow(QDialog):
         pattern_layout.addRow("", QLabel("Use {timestamp} for date/time"))
         layout.addWidget(pattern_group)
 
+        # Recording
+        recording_group = QGroupBox("Screen Recording")
+        recording_layout = QFormLayout(recording_group)
+        self._recording_fps_combo = QComboBox()
+        self._recording_fps_combo.addItems(["10", "15", "20", "30"])
+        recording_layout.addRow("Frame rate:", self._recording_fps_combo)
+        recording_layout.addRow("", QLabel("Recordings are saved as MP4 files"))
+        layout.addWidget(recording_group)
+
         layout.addStretch()
         return tab
 
@@ -389,6 +398,14 @@ class SettingsWindow(QDialog):
               <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Print Screen</code></td></tr>
         </table>
         <p style="color: #aaa; margin-left: 8px;">You can also right-click the tray icon to capture.</p>
+
+        <h3 style="color: #0099FF;">Screen Recording</h3>
+        <ol style="color: #ccc; margin-left: 8px;">
+          <li>Right-click the tray icon and open <b>Screen Record</b></li>
+          <li>Choose <b>Record Region</b>, <b>Record All Monitors</b>, or a specific monitor</li>
+          <li>Use <b>Screen Record - Stop Recording</b> from the tray menu to finish</li>
+        </ol>
+        <p style="color: #aaa; margin-left: 8px;">MP4 recordings are saved to your configured save folder.</p>
 
         <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
@@ -522,6 +539,10 @@ class SettingsWindow(QDialog):
             self._format_combo.setCurrentIndex(idx)
         
         self._pattern_edit.setText(self._config.get("filename_pattern", "ClearShot_{timestamp}"))
+        fps = str(self._config.get("recording_fps", 15))
+        fps_idx = self._recording_fps_combo.findText(fps)
+        if fps_idx >= 0:
+            self._recording_fps_combo.setCurrentIndex(fps_idx)
         self._hotkey_region._value = self._config.get_hotkey("region_capture")
         self._hotkey_region._display.setText(self._config.get_hotkey("region_capture"))
         self._hotkey_fullscreen._value = self._config.get_hotkey("fullscreen_capture")
@@ -543,6 +564,7 @@ class SettingsWindow(QDialog):
         self._config.set("save_path", self._save_path_edit.text())
         self._config.set("image_format", self._format_combo.currentText())
         self._config.set("filename_pattern", self._pattern_edit.text())
+        self._config.set("recording_fps", int(self._recording_fps_combo.currentText()))
         self._config.set_hotkey("region_capture", self._hotkey_region.value)
         self._config.set_hotkey("fullscreen_capture", self._hotkey_fullscreen.value)
         self._config.set("start_with_windows", self._auto_start_cb.isChecked())

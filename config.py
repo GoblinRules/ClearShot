@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "font_size": DEFAULT_FONT_SIZE,
     "copy_to_clipboard_on_save": True,
     "show_magnifier": True,
+    "recording_fps": 15,
     "play_sound": False,
 }
 

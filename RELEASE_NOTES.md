@@ -1,17 +1,18 @@
-# ClearShot v1.0.12
+# ClearShot v1.1.0
 
-## Fixes
+## New
 
-- Fixed a crash when drawing arrows from the quick capture overlay.
-- Normalized arrow annotation endpoints so the shared renderer handles both overlay mouse points and editor canvas points safely.
-- Kept the refined proportional arrowhead rendering from v1.0.11.
+- Added screen recording with MP4 output.
+- Added recording options for a selected region, all monitors, or a specific monitor from the tray menu.
+- Added a recording region selection overlay and a tray-menu Stop Recording action.
+- Added a recording frame-rate setting.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.0.12.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
+| **ClearShot_Setup_1.1.0.exe** | Full installer - Start Menu, desktop shortcut, auto-start option |
 
 ## Requirements
 

@@ -98,6 +98,15 @@ python main.py
 
 You can also right-click the **system tray icon** to access capture options.
 
+### Screen Recording
+
+Right-click the tray icon and open **Screen Record**:
+
+- **Record Region** - Drag to select an area, then recording starts
+- **Record All Monitors** - Record the full virtual desktop
+- **Record Monitor** - Pick a specific display
+- **Stop Recording** - Finish and save the MP4 to your configured save folder
+
 ### Region Capture
 
 1. Press `Print Screen` (or your custom hotkey)
