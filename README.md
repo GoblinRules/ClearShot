@@ -22,7 +22,7 @@
 - **Region Capture** — Select any area of your screen with a crosshair overlay
 - **Fullscreen Capture** — Grab your entire screen (or pick a specific monitor)
 - **Built-in Annotation Editor** — Draw, highlight, blur, and add text before saving
-- **Screen Recording** — Record a region, monitor, or all screens with pause/stop controls, live annotations, and audio modes
+- **Screen Recording** — Record a region, monitor, or all screens with capture-excluded floating controls, live annotations, and audio modes
 - **Quick Actions** — Copy to clipboard, save to file, or quick-save with one click
 - **System Tray** — Lives quietly in your tray, always ready
 - **Customizable Hotkeys** — Set your own screenshot and recording keybindings
@@ -106,8 +106,9 @@ Right-click the tray icon and open **Screen Record**:
 - **Record Region** - Drag to select an area, then recording starts
 - **Record All Monitors** - Record the full virtual desktop
 - **Record Monitor** - Pick a specific display
-- **Show Annotation Tools** - Hold the configured annotation input key to draw pen strokes, arrows, shapes, text, and numbered markers into the live recording
-- **Pause Recording / Resume Recording** - Temporarily pause and continue the active recording
+- **Floating Recording Controls** - The REC timer and annotation toolbar appear automatically, stay out of the saved video, and become more prominent on hover
+- **Show / Hide Annotation Tools** - Hold the configured annotation input key to draw pen strokes, arrows, shapes, text, and numbered markers into the live recording
+- **Pause Recording / Resume Recording** - Temporarily pause and continue the active recording from the tray, hotkey, or floating toolbar
 - **Stop Recording** - Finish and save the recording to your configured recording folder
 
 Default recording hotkeys:

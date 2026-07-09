@@ -964,8 +964,39 @@ class RecordingAnnotationCanvas(QWidget):
         self._store.set_items(items)
 
 
+class RecordingToolbarFrame(QFrame):
+    """Solid toolbar chrome with a quieter idle state that remains capture-excludable."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._idle_style = ""
+        self._focus_style = ""
+        self._focused = False
+
+    def set_visual_styles(self, idle_style: str, focus_style: str) -> None:
+        self._idle_style = idle_style
+        self._focus_style = focus_style
+        self._apply_visual_state()
+
+    def enterEvent(self, event) -> None:
+        self._focused = True
+        self._apply_visual_state()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._focused = False
+        self._apply_visual_state()
+        super().leaveEvent(event)
+
+    def _apply_visual_state(self) -> None:
+        self.setStyleSheet(self._focus_style if self._focused else self._idle_style)
+
+
 class RecordingAnnotationOverlay(QWidget):
     """Topmost drawing surface for annotations captured in active recordings."""
+
+    pause_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -979,6 +1010,8 @@ class RecordingAnnotationOverlay(QWidget):
         self._store = store
         self._hold_key = normalize_annotation_hold_key(hold_key)
         self._draw_input_active: bool | None = None
+        self._paused = False
+        self._pause_btn: QToolButton | None = None
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -1010,6 +1043,15 @@ class RecordingAnnotationOverlay(QWidget):
         self._hold_key = normalize_annotation_hold_key(hold_key)
         self._refresh_toolbar_hint()
         self._refresh_input_mode(force=True)
+
+    def set_paused(self, paused: bool) -> None:
+        self._paused = paused
+        if self._pause_btn is None:
+            return
+        icon_name = "play" if paused else "pause"
+        tooltip = "Resume recording" if paused else "Pause recording"
+        self._pause_btn.setIcon(ui_icon(icon_name))
+        self._pause_btn.setToolTip(tooltip)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1068,7 +1110,18 @@ class RecordingAnnotationOverlay(QWidget):
             self._toolbar.setToolTip("Annotation drawing is always active")
 
     def _position_toolbar(self) -> None:
-        self._toolbar.move(self._record_rect.left() + 8, self._record_rect.top() + 8)
+        margin = 8
+        badge_space = 108
+        self._toolbar.adjustSize()
+        toolbar_width = self._toolbar.sizeHint().width()
+        available_width = self._record_rect.width() - badge_space - (margin * 3)
+        if available_width >= toolbar_width:
+            x = self._record_rect.left() + badge_space + (margin * 2)
+            y = self._record_rect.top() + margin
+        else:
+            x = self._record_rect.left() + margin
+            y = self._record_rect.top() + 44
+        self._toolbar.move(x, y)
 
     def raise_(self) -> None:
         super().raise_()
@@ -1109,7 +1162,7 @@ class RecordingAnnotationOverlay(QWidget):
             super().keyPressEvent(event)
 
     def _create_toolbar(self) -> QFrame:
-        toolbar = QFrame()
+        toolbar = RecordingToolbarFrame()
         toolbar.setObjectName("recordingAnnotationToolbar")
         toolbar.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -1118,46 +1171,7 @@ class RecordingAnnotationOverlay(QWidget):
         )
         toolbar.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         toolbar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        toolbar.setStyleSheet("""
-            #recordingAnnotationToolbar {
-                background: rgba(35, 35, 35, 232);
-                border: 1px solid #555;
-                border-radius: 5px;
-            }
-            QToolButton, QPushButton {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 4px;
-                padding: 5px;
-                color: #ddd;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QToolButton:hover, QPushButton:hover {
-                background: #3d3d3d;
-                border-color: #666;
-            }
-            QToolButton:checked {
-                background: #0078D4;
-                border-color: #0078D4;
-            }
-            QLabel {
-                color: #aaa;
-                font-size: 11px;
-            }
-            QSlider::groove:horizontal {
-                height: 4px;
-                background: #555;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                width: 13px;
-                height: 13px;
-                margin: -5px 0;
-                background: #0099FF;
-                border-radius: 6px;
-            }
-        """)
+        toolbar.set_visual_styles(self._toolbar_stylesheet(focused=False), self._toolbar_stylesheet(focused=True))
 
         layout = QHBoxLayout(toolbar)
         layout.setContentsMargins(6, 5, 6, 5)
@@ -1226,6 +1240,23 @@ class RecordingAnnotationOverlay(QWidget):
 
         layout.addWidget(self._separator())
 
+        self._pause_btn = QToolButton(toolbar)
+        self._pause_btn.setIconSize(QSize(17, 17))
+        self._pause_btn.setFixedSize(30, 28)
+        self._pause_btn.clicked.connect(self.pause_requested.emit)
+        layout.addWidget(self._pause_btn)
+        self.set_paused(self._paused)
+
+        stop_btn = QToolButton(toolbar)
+        stop_btn.setIcon(ui_icon("stop"))
+        stop_btn.setIconSize(QSize(17, 17))
+        stop_btn.setFixedSize(30, 28)
+        stop_btn.setToolTip("Stop recording")
+        stop_btn.clicked.connect(self.stop_requested.emit)
+        layout.addWidget(stop_btn)
+
+        layout.addWidget(self._separator())
+
         undo_btn = QToolButton(toolbar)
         undo_btn.setIcon(ui_icon("undo"))
         undo_btn.setIconSize(QSize(17, 17))
@@ -1244,6 +1275,54 @@ class RecordingAnnotationOverlay(QWidget):
 
         toolbar.adjustSize()
         return toolbar
+
+    def _toolbar_stylesheet(self, focused: bool) -> str:
+        background = "#232323" if focused else "#2b2b2b"
+        border = "#666" if focused else "#474747"
+        text = "#f0f3f7" if focused else "#b9c0c8"
+        hover = "#3d3d3d" if focused else "#353535"
+        slider_track = "#5b5b5b" if focused else "#474747"
+        return f"""
+            #recordingAnnotationToolbar {{
+                background: {background};
+                border: 1px solid {border};
+                border-radius: 5px;
+            }}
+            QToolButton, QPushButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 5px;
+                color: {text};
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QToolButton:hover, QPushButton:hover {{
+                background: {hover};
+                border-color: #777;
+            }}
+            QToolButton:checked {{
+                background: #0078D4;
+                border-color: #0078D4;
+                color: #ffffff;
+            }}
+            QLabel {{
+                color: {text};
+                font-size: 11px;
+            }}
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {slider_track};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 13px;
+                height: 13px;
+                margin: -5px 0;
+                background: #0099FF;
+                border-radius: 6px;
+            }}
+        """
 
     def _separator(self) -> QFrame:
         sep = QFrame(self._toolbar if hasattr(self, "_toolbar") else self)

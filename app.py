@@ -679,11 +679,14 @@ class ClearShotApp:
 
     def _on_recording_started(self, path: str, target: str):
         self._set_recording_indicator(True, False)
-        if self._recording_rect is not None and self._config.get("show_recording_border", True):
-            self._show_recording_border(self._recording_rect)
+        if self._recording_rect is not None:
+            if self._config.get("show_recording_border", True):
+                self._show_recording_border(self._recording_rect)
+            self._show_recording_annotations(self._recording_rect, activate=False)
+        self._build_tray_menu()
         self._tray.showMessage(
             APP_NAME,
-            f"Recording {target}. Use the tray menu or hotkeys to pause or stop.",
+            f"Recording {target}. Use the floating controls, tray menu, or hotkeys to pause or stop.",
             QSystemTrayIcon.MessageIcon.Information,
             2500,
         )
@@ -721,12 +724,16 @@ class ClearShotApp:
         self._set_recording_indicator(True, True)
         if self._record_border_overlay is not None:
             self._record_border_overlay.set_paused(True)
+        if self._record_annotation_overlay is not None:
+            self._record_annotation_overlay.set_paused(True)
         self._build_tray_menu()
 
     def _on_recording_resumed(self):
         self._set_recording_indicator(True, False)
         if self._record_border_overlay is not None:
             self._record_border_overlay.set_paused(False)
+        if self._record_annotation_overlay is not None:
+            self._record_annotation_overlay.set_paused(False)
         self._build_tray_menu()
 
     def _show_recording_border(self, rect: QRect) -> None:
@@ -752,7 +759,7 @@ class ClearShotApp:
             self._show_recording_annotations(self._recording_rect)
         self._build_tray_menu()
 
-    def _show_recording_annotations(self, rect: QRect) -> None:
+    def _show_recording_annotations(self, rect: QRect, activate: bool = True) -> None:
         if self._record_annotation_store is None:
             self._record_annotation_store = RecordingAnnotationStore()
         hold_key = self._recording_annotation_hold_key()
@@ -762,11 +769,15 @@ class ClearShotApp:
                 self._record_annotation_store,
                 hold_key=hold_key,
             )
+            self._record_annotation_overlay.pause_requested.connect(self._toggle_recording_pause)
+            self._record_annotation_overlay.stop_requested.connect(self._stop_recording)
         else:
             self._record_annotation_overlay.set_hold_key(hold_key)
+        self._record_annotation_overlay.set_paused(bool(self._recorder and self._recorder.is_paused))
         self._record_annotation_overlay.show()
         self._record_annotation_overlay.raise_()
-        self._record_annotation_overlay.activateWindow()
+        if activate:
+            self._record_annotation_overlay.activateWindow()
 
     def _recording_annotation_hold_key(self) -> str:
         return str(

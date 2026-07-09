@@ -1,16 +1,18 @@
-# ClearShot v1.3.6
+# ClearShot v1.3.7
 
-## Fixed
+## Improved
 
-- Prevented the live recording text-entry prompt from appearing in saved recordings.
-- Text annotations still work normally and are composited into the saved video frames.
+- The recording annotation toolbar now appears automatically when a recording starts.
+- Added floating pause/resume and stop controls beside the live recording annotation tools.
+- Refined the recording toolbar placement so it does not cover the REC timer when space allows.
+- Gave the recording toolbar a quieter idle state that comes into focus on hover while remaining excluded from the saved video.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.6.exe** | Full installer - Start Menu and desktop shortcuts |
+| **ClearShot_Setup_1.3.7.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 
