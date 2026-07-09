@@ -1,22 +1,17 @@
-# ClearShot v1.3.4
+# ClearShot v1.3.5
 
 ## Fixed
 
-- Removed the installer Additional Tasks page after reports that it could render as an empty focus box and block normal mouse use.
-- The installer now closes any running ClearShot process at startup before showing the wizard, preventing old tray overlays from interfering with setup.
-- Desktop shortcut creation is now direct and no longer depends on the removed task page.
-- Fixed live recording annotations not receiving real mouse input on the transparent drawing surface.
-
-## Changed
-
-- Start with Windows is managed from ClearShot Settings instead of the installer wizard.
+- Prevented the recording border, REC timer badge, and live annotation toolbar from appearing in saved recordings.
+- Kept the border, REC badge, and annotation toolbar visible on screen by moving them to capture-excluded top-level UI chrome.
+- Preserved live annotation recording by compositing annotation strokes into the saved video frames.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.4.exe** | Full installer - Start Menu and desktop shortcuts |
+| **ClearShot_Setup_1.3.5.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 

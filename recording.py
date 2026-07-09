@@ -90,8 +90,10 @@ def exclude_widget_from_capture(widget: QWidget) -> None:
     if os.name != "nt":
         return
     try:
-        hwnd = int(widget.winId())
-        user32 = ctypes.windll.user32
+        hwnd = wintypes.HWND(int(widget.winId()))
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
         if not user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE):
             user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
     except Exception:
@@ -725,11 +727,24 @@ class RecordingBorderOverlay(QWidget):
 
     def __init__(self, rect: QRect, parent=None):
         super().__init__(parent)
-        self._virtual_rect = get_virtual_screen_geometry()
         self._record_rect = normalize_recording_rect(rect)
         self._started_at = time.perf_counter()
         self._paused = False
+        self._thickness = 3
+        self._segments = [self._create_chrome_widget() for _ in range(4)]
+        self._badge = QLabel()
+        self._prepare_chrome_widget(self._badge)
+        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._badge.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
 
+        self._layout_chrome()
+        self._update_chrome()
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_chrome)
+        self._timer.start(500)
+
+    def _prepare_chrome_widget(self, widget: QWidget) -> None:
         flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -737,61 +752,69 @@ class RecordingBorderOverlay(QWidget):
         )
         if hasattr(Qt.WindowType, "WindowTransparentForInput"):
             flags |= Qt.WindowType.WindowTransparentForInput
-        self.setWindowFlags(flags)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setGeometry(self._virtual_rect)
+        widget.setWindowFlags(flags)
+        widget.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.update)
-        self._timer.start(500)
+    def _create_chrome_widget(self) -> QWidget:
+        widget = QWidget()
+        self._prepare_chrome_widget(widget)
+        return widget
+
+    def _layout_chrome(self) -> None:
+        r = self._record_rect
+        t = self._thickness
+        geometries = [
+            QRect(r.left(), r.top(), r.width(), t),
+            QRect(r.left(), r.bottom() - t + 1, r.width(), t),
+            QRect(r.left(), r.top(), t, r.height()),
+            QRect(r.right() - t + 1, r.top(), t, r.height()),
+        ]
+        for widget, geometry in zip(self._segments, geometries):
+            widget.setGeometry(geometry)
 
     def set_paused(self, paused: bool) -> None:
         self._paused = paused
-        self.update()
+        self._update_chrome()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        exclude_widget_from_capture(self)
+    def show(self) -> None:
+        self._layout_chrome()
+        self._update_chrome()
+        for widget in [*self._segments, self._badge]:
+            widget.show()
+            exclude_widget_from_capture(widget)
+        self.raise_()
 
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def raise_(self) -> None:
+        for widget in [*self._segments, self._badge]:
+            widget.raise_()
 
-        local = QRectF(self._record_rect).translated(
-            -self._virtual_rect.x(),
-            -self._virtual_rect.y(),
-        )
+    def close(self) -> bool:
+        self._timer.stop()
+        for widget in [*self._segments, self._badge]:
+            widget.close()
+        return super().close()
+
+    def _update_chrome(self) -> None:
         color = QColor("#ff3b30" if not self._paused else "#ffb020")
-        pen = QPen(color, 3, Qt.PenStyle.SolidLine)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(local.adjusted(1.5, 1.5, -1.5, -1.5))
+        for widget in self._segments:
+            widget.setStyleSheet(f"background: {color.name()};")
 
         elapsed = max(0, int(time.perf_counter() - self._started_at))
         label = "PAUSED" if self._paused else f"REC {elapsed // 60:02d}:{elapsed % 60:02d}"
-        self._draw_badge(painter, local, label, color)
-        painter.end()
-
-    def _draw_badge(self, painter: QPainter, target: QRectF, text: str, color: QColor) -> None:
-        font = QFont("Segoe UI", 9, QFont.Weight.Bold)
-        painter.setFont(font)
-        fm = painter.fontMetrics()
-        width = fm.horizontalAdvance(text) + 22
-        height = fm.height() + 8
-        x = target.left() + 8
-        y = target.top() + 8
-        if target.height() < height + 18:
-            y = max(8, target.top() - height - 6)
-        badge = QRectF(x, y, width, height)
-
-        fill = QColor(20, 20, 20, 230)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(fill)
-        painter.drawRoundedRect(badge, 4, 4)
-        painter.setPen(QPen(QColor("#f5f7fb")))
-        painter.drawText(badge.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignCenter, text)
+        self._badge.setText(label)
+        self._badge.setStyleSheet(
+            "QLabel {"
+            "background: #141414;"
+            f"border: 1px solid {color.name()};"
+            "border-radius: 4px;"
+            "color: #f5f7fb;"
+            "padding: 5px 9px;"
+            "}"
+        )
+        self._badge.adjustSize()
+        self._badge.move(self._record_rect.left() + 8, self._record_rect.top() + 8)
+        exclude_widget_from_capture(self._badge)
 
 
 class RecordingAnnotationCanvas(QWidget):
@@ -952,9 +975,7 @@ class RecordingAnnotationOverlay(QWidget):
         self._canvas = RecordingAnnotationCanvas(self._store, self)
         self._canvas.setGeometry(self.rect())
         self._toolbar = self._create_toolbar()
-        self._toolbar.setParent(self)
-        self._toolbar.move(8, 8)
-        self._toolbar.raise_()
+        self._position_toolbar()
         self._refresh_toolbar_hint()
 
         self._input_timer = QTimer(self)
@@ -976,11 +997,22 @@ class RecordingAnnotationOverlay(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         exclude_widget_from_capture(self)
+        self._position_toolbar()
+        self._toolbar.show()
+        exclude_widget_from_capture(self._toolbar)
+        self._toolbar.raise_()
         self._refresh_input_mode(force=True)
+
+    def hideEvent(self, event) -> None:
+        self._toolbar.hide()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._toolbar.close()
+        super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:
         self._canvas.setGeometry(self.rect())
-        self._toolbar.raise_()
         super().resizeEvent(event)
 
     def paintEvent(self, event) -> None:
@@ -994,10 +1026,7 @@ class RecordingAnnotationOverlay(QWidget):
             try:
                 msg = wintypes.MSG.from_address(int(message))
                 if msg.message == WM_NCHITTEST:
-                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
-                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
-                    if not self._toolbar.geometry().contains(self.mapFromGlobal(QPoint(x, y))):
-                        return True, HTTRANSPARENT
+                    return True, HTTRANSPARENT
             except Exception:
                 pass
         return False, 0
@@ -1012,6 +1041,7 @@ class RecordingAnnotationOverlay(QWidget):
         self._canvas.repaint()
         if active:
             self.raise_()
+            self._toolbar.raise_()
 
     def _refresh_toolbar_hint(self) -> None:
         hold_label = format_annotation_hold_key(self._hold_key)
@@ -1019,6 +1049,13 @@ class RecordingAnnotationOverlay(QWidget):
             self._toolbar.setToolTip(f"Hold {hold_label} and drag to annotate")
         else:
             self._toolbar.setToolTip("Annotation drawing is always active")
+
+    def _position_toolbar(self) -> None:
+        self._toolbar.move(self._record_rect.left() + 8, self._record_rect.top() + 8)
+
+    def raise_(self) -> None:
+        super().raise_()
+        self._toolbar.raise_()
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
@@ -1055,8 +1092,14 @@ class RecordingAnnotationOverlay(QWidget):
             super().keyPressEvent(event)
 
     def _create_toolbar(self) -> QFrame:
-        toolbar = QFrame(self)
+        toolbar = QFrame()
         toolbar.setObjectName("recordingAnnotationToolbar")
+        toolbar.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        toolbar.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         toolbar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         toolbar.setStyleSheet("""
             #recordingAnnotationToolbar {
