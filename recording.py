@@ -21,6 +21,7 @@ from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPi
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QColorDialog,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -98,6 +99,14 @@ def exclude_widget_from_capture(widget: QWidget) -> None:
             user32.SetWindowDisplayAffinity(hwnd, WDA_MONITOR)
     except Exception:
         pass
+
+
+class CaptureExcludedInputDialog(QInputDialog):
+    """Input dialog that stays visible locally but is hidden from screen capture."""
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        exclude_widget_from_capture(self)
 
 
 def normalize_annotation_hold_key(combo: str | None) -> str:
@@ -929,8 +938,16 @@ class RecordingAnnotationCanvas(QWidget):
         self.update()
 
     def _place_text(self, pos: QPointF) -> None:
-        text, ok = QInputDialog.getText(self, "Add Recording Text", "Enter text:")
-        if not ok or not text:
+        dialog = CaptureExcludedInputDialog(self)
+        dialog.setWindowTitle("Add Recording Text")
+        dialog.setLabelText("Enter text:")
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        dialog.setTextValue("")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        text = dialog.textValue()
+        if not text:
             return
         item = TextItem(color=self.current_color, width=self.current_width)
         item.position = pos

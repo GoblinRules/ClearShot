@@ -1,17 +1,16 @@
-# ClearShot v1.3.5
+# ClearShot v1.3.6
 
 ## Fixed
 
-- Prevented the recording border, REC timer badge, and live annotation toolbar from appearing in saved recordings.
-- Kept the border, REC badge, and annotation toolbar visible on screen by moving them to capture-excluded top-level UI chrome.
-- Preserved live annotation recording by compositing annotation strokes into the saved video frames.
+- Prevented the live recording text-entry prompt from appearing in saved recordings.
+- Text annotations still work normally and are composited into the saved video frames.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.5.exe** | Full installer - Start Menu and desktop shortcuts |
+| **ClearShot_Setup_1.3.6.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 
