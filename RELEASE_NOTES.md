@@ -1,18 +1,18 @@
-# ClearShot v1.3.7
+# ClearShot v1.3.8
 
 ## Improved
 
-- The recording annotation toolbar now appears automatically when a recording starts.
-- Added floating pause/resume and stop controls beside the live recording annotation tools.
-- Refined the recording toolbar placement so it does not cover the REC timer when space allows.
-- Gave the recording toolbar a quieter idle state that comes into focus on hover while remaining excluded from the saved video.
+- Reworked the annotation toolbar icons to use clearer Pictogrammers Material Design Icons paths.
+- Replaced the old pen/draw hybrid icon with a cleaner pencil icon.
+- Updated arrow, rectangle, ellipse, blur, and filled-rectangle/highlight icons for better toolbar readability.
+- Routed the Edit action to a distinct image-edit icon so it no longer looks like the pen tool.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.7.exe** | Full installer - Start Menu and desktop shortcuts |
+| **ClearShot_Setup_1.3.8.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 
