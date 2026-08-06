@@ -1,7 +1,7 @@
 ; ClearShot Installer Script for Inno Setup
 
 #define MyAppName "ClearShot"
-#define MyAppVersion "1.3.8"
+#define MyAppVersion "1.3.9"
 #define MyAppPublisher "GoblinRules"
 #define MyAppURL "https://github.com/GoblinRules/ClearShot"
 #define MyAppExeName "ClearShot.exe"

@@ -3,7 +3,7 @@
 import os
 
 APP_NAME = "ClearShot"
-APP_VERSION = "1.3.8"
+APP_VERSION = "1.3.9"
 APP_AUTHOR = "ClearShot"
 
 # Paths

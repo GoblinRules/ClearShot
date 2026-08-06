@@ -223,6 +223,11 @@ def list_audio_sources(timeout: float = 5.0) -> list[str]:
         return []
 
     text = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+    return _parse_directshow_audio_sources(text)
+
+
+def _parse_directshow_audio_sources(text: str) -> list[str]:
+    """Extract DirectShow audio device names from ffmpeg device-list output."""
     in_audio_section = False
     names: list[str] = []
     for line in text.splitlines():
@@ -233,7 +238,9 @@ def list_audio_sources(timeout: float = 5.0) -> list[str]:
         if "directshow video devices" in lower:
             in_audio_section = False
             continue
-        if not in_audio_section or "alternative name" in lower:
+        if "alternative name" in lower:
+            continue
+        if not in_audio_section and "(audio)" not in lower:
             continue
 
         match = re.search(r'"([^"]+)"', line)
