@@ -187,9 +187,26 @@ class SettingsWindow(QDialog):
                 border-radius: 4px;
                 padding: 6px;
             }
+            QComboBox {
+                padding-right: 28px;
+            }
             QComboBox::drop-down {
-                border: none;
-                padding-right: 8px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left: 1px solid #555;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                background: #333;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0;
+                height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #ddd;
+                margin-right: 6px;
             }
             QComboBox QAbstractItemView {
                 background: #3a3a3a;
@@ -333,10 +350,15 @@ class SettingsWindow(QDialog):
         recording_layout.addRow("Audio:", self._recording_audio_mode_combo)
 
         self._recording_audio_source_combo = QComboBox()
-        self._recording_audio_source_combo.setEditable(True)
-        self._recording_audio_source_combo.addItem("")
-        for source in list_audio_sources():
-            self._recording_audio_source_combo.addItem(source)
+        self._recording_audio_source_combo.setEditable(False)
+        self._recording_audio_source_combo.setToolTip("Choose the microphone input to record.")
+        self._microphone_sources = list_audio_sources()
+        if self._microphone_sources:
+            self._recording_audio_source_combo.addItem("Select microphone input", "")
+            for source in self._microphone_sources:
+                self._recording_audio_source_combo.addItem(source, source)
+        else:
+            self._recording_audio_source_combo.addItem("No microphone inputs found", "")
         recording_layout.addRow("Microphone:", self._recording_audio_source_combo)
 
         self._recording_system_audio_combo = QComboBox()
@@ -615,6 +637,15 @@ class SettingsWindow(QDialog):
         mode = self._recording_audio_mode_combo.currentData()
         self._recording_audio_source_combo.setEnabled(mode == AUDIO_MODE_MICROPHONE)
         self._recording_system_audio_combo.setEnabled(mode == AUDIO_MODE_SYSTEM)
+        if mode == AUDIO_MODE_MICROPHONE and not self._selected_microphone_source():
+            if self._recording_audio_source_combo.count() > 1:
+                self._recording_audio_source_combo.setCurrentIndex(1)
+
+    def _selected_microphone_source(self) -> str:
+        data = self._recording_audio_source_combo.currentData()
+        if data is not None:
+            return str(data).strip()
+        return self._recording_audio_source_combo.currentText().strip()
 
     def _load_values(self):
         """Load current config values into the UI."""
@@ -652,11 +683,18 @@ class SettingsWindow(QDialog):
         audio_source = self._config.get("recording_microphone_source", "")
         if not audio_source:
             audio_source = self._config.get("recording_audio_source", "")
-        audio_source_idx = self._recording_audio_source_combo.findText(audio_source)
+        audio_source_idx = self._recording_audio_source_combo.findData(audio_source)
         if audio_source_idx >= 0:
             self._recording_audio_source_combo.setCurrentIndex(audio_source_idx)
+        elif audio_source:
+            self._recording_audio_source_combo.addItem(audio_source, audio_source)
+            self._recording_audio_source_combo.setCurrentIndex(
+                self._recording_audio_source_combo.count() - 1
+            )
+        elif audio_mode == AUDIO_MODE_MICROPHONE and self._recording_audio_source_combo.count() > 1:
+            self._recording_audio_source_combo.setCurrentIndex(1)
         else:
-            self._recording_audio_source_combo.setCurrentText(audio_source)
+            self._recording_audio_source_combo.setCurrentIndex(0)
 
         system_audio_device = self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE)
         system_audio_idx = self._recording_system_audio_combo.findData(system_audio_device)
@@ -701,7 +739,7 @@ class SettingsWindow(QDialog):
         self._config.set("show_recording_border", self._show_recording_border_cb.isChecked())
         self._config.set("recording_annotation_hold_key", self._recording_annotation_hold_combo.currentData() or "")
         audio_mode = self._recording_audio_mode_combo.currentData() or AUDIO_MODE_NONE
-        microphone_source = self._recording_audio_source_combo.currentText().strip()
+        microphone_source = self._selected_microphone_source()
         system_audio_device = self._recording_system_audio_combo.currentData() or SYSTEM_AUDIO_DEFAULT_DEVICE
         self._config.set("recording_audio_mode", audio_mode)
         self._config.set("recording_audio_enabled", audio_mode != AUDIO_MODE_NONE)

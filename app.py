@@ -33,6 +33,7 @@ from recording import (
     RecordingSelectionOverlay,
     ScreenRecorder,
     SYSTEM_AUDIO_DEFAULT_DEVICE,
+    list_audio_sources,
     make_recording_path,
     normalize_recording_rect,
 )
@@ -622,6 +623,12 @@ class ClearShotApp:
             microphone_source = str(self._config.get("recording_microphone_source", "")).strip()
             if not microphone_source:
                 microphone_source = str(self._config.get("recording_audio_source", "")).strip()
+            if not microphone_source:
+                available_microphones = list_audio_sources()
+                if available_microphones:
+                    microphone_source = available_microphones[0]
+                    self._config.set("recording_microphone_source", microphone_source)
+                    self._config.set("recording_audio_source", microphone_source)
             if not microphone_source:
                 QMessageBox.warning(
                     None,
