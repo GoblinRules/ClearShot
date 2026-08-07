@@ -1,19 +1,17 @@
-# ClearShot v1.3.11
+# ClearShot v1.3.12
 
 ## Fixed
 
-- Added a clear finalizing state after pressing Stop during screen recording.
-- The recording border now changes to a FINALIZING badge while the video is being saved.
-- The floating recording toolbar now shows the finalizing status and disables repeated pause/stop clicks.
-- The tray icon, tooltip, and screen-record menu now show that the recording is finalizing instead of looking stuck.
-- System-audio recordings update the status while audio and video are being combined.
+- Fixed consecutive recording sessions so a stale finish/finalize signal from the previous recording cannot affect the next one.
+- Treats a finalizing recording as active until cleanup is complete, preventing a new recording from starting in the small handoff window.
+- Keeps recorder workers alive until their thread has fully finished, avoiding second-run stop state issues.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
 | **ClearShot.exe** | Portable app - just run, no installation needed |
-| **ClearShot_Setup_1.3.11.exe** | Full installer - Start Menu and desktop shortcuts |
+| **ClearShot_Setup_1.3.12.exe** | Full installer - Start Menu and desktop shortcuts |
 
 ## Requirements
 

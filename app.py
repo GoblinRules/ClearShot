@@ -226,6 +226,8 @@ class ClearShotApp:
         self._recording_rect: QRect | None = None
         self._recording_finalizing = False
         self._recording_finalizing_message = ""
+        self._recording_session_id = 0
+        self._retired_recorders: list[ScreenRecorder] = []
 
         # Ensure DPI awareness
         ensure_dpi_awareness()
@@ -534,7 +536,24 @@ class ClearShotApp:
         self._tray.setContextMenu(menu)
 
     def _is_recording(self) -> bool:
-        return self._recorder is not None and self._recorder.isRunning()
+        return self._recorder is not None and (
+            self._recorder.isRunning() or self._recording_finalizing
+        )
+
+    def _is_current_recorder(self, recorder: ScreenRecorder, session_id: int) -> bool:
+        return recorder is self._recorder and session_id == self._recording_session_id
+
+    def _retain_recorder_until_finished(self, recorder: ScreenRecorder) -> None:
+        if recorder.isRunning() and recorder not in self._retired_recorders:
+            self._retired_recorders.append(recorder)
+
+    def _on_recorder_thread_finished(self, recorder: ScreenRecorder, session_id: int) -> None:
+        try:
+            self._retired_recorders.remove(recorder)
+        except ValueError:
+            pass
+        if self._is_current_recorder(recorder, session_id):
+            self._build_tray_menu()
 
     def _on_tray_activated(self, reason):
         """Handle tray icon click."""
@@ -669,7 +688,9 @@ class ClearShotApp:
         self._recording_finalizing = False
         self._recording_finalizing_message = ""
         self._record_annotation_store = RecordingAnnotationStore()
-        self._recorder = ScreenRecorder(
+        self._recording_session_id += 1
+        session_id = self._recording_session_id
+        recorder = ScreenRecorder(
             self._recording_rect,
             output_path,
             fps,
@@ -678,14 +699,29 @@ class ClearShotApp:
             system_audio_device=system_audio_device,
             annotation_store=self._record_annotation_store,
         )
-        self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
-        self._recorder.recording_finalizing.connect(self._on_recording_finalizing)
-        self._recorder.recording_finished.connect(self._on_recording_finished)
-        self._recorder.recording_failed.connect(self._on_recording_failed)
-        self._recorder.recording_paused.connect(self._on_recording_paused)
-        self._recorder.recording_resumed.connect(self._on_recording_resumed)
-        self._recorder.finished.connect(self._build_tray_menu)
-        self._recorder.start()
+        self._recorder = recorder
+        recorder.recording_started.connect(
+            lambda path, target=label, rec=recorder, sid=session_id: self._on_recording_started(rec, sid, path, target)
+        )
+        recorder.recording_finalizing.connect(
+            lambda message, rec=recorder, sid=session_id: self._on_recording_finalizing(rec, sid, message)
+        )
+        recorder.recording_finished.connect(
+            lambda path, duration, frames, rec=recorder, sid=session_id: self._on_recording_finished(rec, sid, path, duration, frames)
+        )
+        recorder.recording_failed.connect(
+            lambda message, rec=recorder, sid=session_id: self._on_recording_failed(rec, sid, message)
+        )
+        recorder.recording_paused.connect(
+            lambda rec=recorder, sid=session_id: self._on_recording_paused(rec, sid)
+        )
+        recorder.recording_resumed.connect(
+            lambda rec=recorder, sid=session_id: self._on_recording_resumed(rec, sid)
+        )
+        recorder.finished.connect(
+            lambda rec=recorder, sid=session_id: self._on_recorder_thread_finished(rec, sid)
+        )
+        recorder.start()
         self._build_tray_menu()
 
     def _get_recording_audio_mode(self) -> str:
@@ -708,7 +744,11 @@ class ClearShotApp:
                 return
             self._recorder.stop()
             if not self._recording_finalizing:
-                self._on_recording_finalizing("Stopping and finalizing video...")
+                self._on_recording_finalizing(
+                    self._recorder,
+                    self._recording_session_id,
+                    "Stopping and finalizing video...",
+                )
 
     def _toggle_recording_pause(self):
         if self._recorder is None or not self._recorder.isRunning():
@@ -717,7 +757,16 @@ class ClearShotApp:
             return
         self._recorder.toggle_pause()
 
-    def _on_recording_started(self, path: str, target: str):
+    def _on_recording_started(self, recorder: ScreenRecorder, session_id: int, path: str, target: str):
+        if not self._is_current_recorder(recorder, session_id):
+            return
+        if recorder.is_stopping:
+            self._on_recording_finalizing(
+                recorder,
+                session_id,
+                self._recording_finalizing_message or "Stopping and finalizing video...",
+            )
+            return
         self._recording_finalizing = False
         self._recording_finalizing_message = ""
         self._set_recording_indicator(True, False)
@@ -733,8 +782,8 @@ class ClearShotApp:
             2500,
         )
 
-    def _on_recording_finalizing(self, message: str):
-        if self._recorder is None:
+    def _on_recording_finalizing(self, recorder: ScreenRecorder, session_id: int, message: str):
+        if not self._is_current_recorder(recorder, session_id):
             return
         first_update = not self._recording_finalizing
         self._recording_finalizing = True
@@ -753,7 +802,17 @@ class ClearShotApp:
                 3000,
             )
 
-    def _on_recording_finished(self, path: str, duration: float, frames: int):
+    def _on_recording_finished(
+        self,
+        recorder: ScreenRecorder,
+        session_id: int,
+        path: str,
+        duration: float,
+        frames: int,
+    ):
+        self._retain_recorder_until_finished(recorder)
+        if not self._is_current_recorder(recorder, session_id):
+            return
         self._recorder = None
         self._recording_rect = None
         self._recording_finalizing = False
@@ -770,7 +829,10 @@ class ClearShotApp:
             3000,
         )
 
-    def _on_recording_failed(self, message: str):
+    def _on_recording_failed(self, recorder: ScreenRecorder, session_id: int, message: str):
+        self._retain_recorder_until_finished(recorder)
+        if not self._is_current_recorder(recorder, session_id):
+            return
         self._recorder = None
         self._recording_rect = None
         self._recording_finalizing = False
@@ -786,7 +848,9 @@ class ClearShotApp:
             f"ClearShot could not record the screen.\n\n{message}",
         )
 
-    def _on_recording_paused(self):
+    def _on_recording_paused(self, recorder: ScreenRecorder, session_id: int):
+        if not self._is_current_recorder(recorder, session_id):
+            return
         if self._recording_finalizing:
             return
         self._set_recording_indicator(True, True)
@@ -796,7 +860,9 @@ class ClearShotApp:
             self._record_annotation_overlay.set_paused(True)
         self._build_tray_menu()
 
-    def _on_recording_resumed(self):
+    def _on_recording_resumed(self, recorder: ScreenRecorder, session_id: int):
+        if not self._is_current_recorder(recorder, session_id):
+            return
         if self._recording_finalizing:
             return
         self._set_recording_indicator(True, False)
@@ -975,12 +1041,15 @@ class ClearShotApp:
         self._record_annotation_store = None
         if self._record_border_overlay:
             self._hide_recording_border()
-        if self._recorder:
+        active_recorders = [rec for rec in [self._recorder, *self._retired_recorders] if rec is not None]
+        for recorder in active_recorders:
             try:
-                self._recorder.stop()
-                self._recorder.wait(5000)
+                recorder.stop()
+                recorder.wait(5000)
             except RuntimeError:
                 pass
+        self._retired_recorders.clear()
+        self._recorder = None
         self._set_recording_indicator(False)
 
         QApplication.quit()
