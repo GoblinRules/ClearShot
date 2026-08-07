@@ -424,6 +424,7 @@ class ScreenRecorder(QThread):
     """Capture a screen rectangle to a video file on a worker thread."""
 
     recording_started = pyqtSignal(str)
+    recording_finalizing = pyqtSignal(str)
     recording_finished = pyqtSignal(str, float, int)
     recording_failed = pyqtSignal(str)
     recording_paused = pyqtSignal()
@@ -459,6 +460,10 @@ class ScreenRecorder(QThread):
     def is_paused(self) -> bool:
         return self._pause_event.is_set()
 
+    @property
+    def is_stopping(self) -> bool:
+        return self._stop_event.is_set()
+
     def pause(self) -> None:
         if not self._pause_event.is_set():
             self._pause_event.set()
@@ -477,6 +482,8 @@ class ScreenRecorder(QThread):
         return True
 
     def stop(self) -> None:
+        if not self._stop_event.is_set():
+            self.recording_finalizing.emit("Stopping and finalizing video...")
         self._stop_event.set()
         self._pause_event.clear()
 
@@ -558,7 +565,10 @@ class ScreenRecorder(QThread):
         )
         try:
             writer.send(None)
-            return self._capture_loop(writer.send)
+            frames = self._capture_loop(writer.send)
+            if self._stop_event.is_set():
+                self.recording_finalizing.emit("Finalizing video file...")
+            return frames
         finally:
             try:
                 writer.close()
@@ -632,6 +642,9 @@ class ScreenRecorder(QThread):
                 except Exception:
                     pass
 
+        if self._stop_event.is_set():
+            self.recording_finalizing.emit("Finalizing video file...")
+
         try:
             return_code = proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -683,6 +696,7 @@ class ScreenRecorder(QThread):
                 raise RuntimeError(audio_recorder.error)
             if audio_recorder.frames <= 0:
                 raise RuntimeError("System audio did not produce any samples.")
+            self.recording_finalizing.emit("Combining audio and video...")
             self._mux_audio(temp_video_path, temp_audio_path, self._output_path)
             return frames
         finally:
@@ -746,6 +760,7 @@ class RecordingBorderOverlay(QWidget):
         self._record_rect = normalize_recording_rect(rect)
         self._started_at = time.perf_counter()
         self._paused = False
+        self._finalizing = False
         self._thickness = 3
         self._segments = [self._create_chrome_widget() for _ in range(4)]
         self._badge = QLabel()
@@ -790,7 +805,15 @@ class RecordingBorderOverlay(QWidget):
             widget.setGeometry(geometry)
 
     def set_paused(self, paused: bool) -> None:
+        if self._finalizing:
+            return
         self._paused = paused
+        self._update_chrome()
+
+    def set_finalizing(self, finalizing: bool) -> None:
+        self._finalizing = finalizing
+        if finalizing:
+            self._paused = False
         self._update_chrome()
 
     def show(self) -> None:
@@ -812,12 +835,20 @@ class RecordingBorderOverlay(QWidget):
         return super().close()
 
     def _update_chrome(self) -> None:
-        color = QColor("#ff3b30" if not self._paused else "#ffb020")
+        if self._finalizing:
+            color = QColor("#0099ff")
+        else:
+            color = QColor("#ffb020" if self._paused else "#ff3b30")
         for widget in self._segments:
             widget.setStyleSheet(f"background: {color.name()};")
 
         elapsed = max(0, int(time.perf_counter() - self._started_at))
-        label = "PAUSED" if self._paused else f"REC {elapsed // 60:02d}:{elapsed % 60:02d}"
+        if self._finalizing:
+            label = "FINALIZING"
+        elif self._paused:
+            label = "PAUSED"
+        else:
+            label = f"REC {elapsed // 60:02d}:{elapsed % 60:02d}"
         self._badge.setText(label)
         self._badge.setStyleSheet(
             "QLabel {"
@@ -1018,7 +1049,10 @@ class RecordingAnnotationOverlay(QWidget):
         self._hold_key = normalize_annotation_hold_key(hold_key)
         self._draw_input_active: bool | None = None
         self._paused = False
+        self._finalizing = False
         self._pause_btn: QToolButton | None = None
+        self._stop_btn: QToolButton | None = None
+        self._status_label: QLabel | None = None
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -1052,6 +1086,8 @@ class RecordingAnnotationOverlay(QWidget):
         self._refresh_input_mode(force=True)
 
     def set_paused(self, paused: bool) -> None:
+        if self._finalizing:
+            return
         self._paused = paused
         if self._pause_btn is None:
             return
@@ -1059,6 +1095,20 @@ class RecordingAnnotationOverlay(QWidget):
         tooltip = "Resume recording" if paused else "Pause recording"
         self._pause_btn.setIcon(ui_icon(icon_name))
         self._pause_btn.setToolTip(tooltip)
+
+    def set_finalizing(self, finalizing: bool, message: str = "") -> None:
+        self._finalizing = finalizing
+        if self._status_label is not None:
+            text = (message or "Finalizing video...").strip()
+            self._status_label.setText(text)
+            self._status_label.setVisible(finalizing)
+        for widget_type in (QToolButton, QPushButton, QSlider):
+            for widget in self._toolbar.findChildren(widget_type):
+                widget.setEnabled(not finalizing)
+        self._canvas.set_drawing_enabled(False if finalizing else self._draw_input_active is not False)
+        self._toolbar.adjustSize()
+        self._position_toolbar()
+        self._refresh_input_mode(force=True)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1098,7 +1148,7 @@ class RecordingAnnotationOverlay(QWidget):
         return False, 0
 
     def _refresh_input_mode(self, force: bool = False) -> None:
-        active = annotation_hold_key_is_pressed(self._hold_key) or self._canvas.is_drawing()
+        active = False if self._finalizing else annotation_hold_key_is_pressed(self._hold_key) or self._canvas.is_drawing()
         if not force and active == self._draw_input_active:
             return
         self._draw_input_active = active
@@ -1247,6 +1297,11 @@ class RecordingAnnotationOverlay(QWidget):
 
         layout.addWidget(self._separator())
 
+        self._status_label = QLabel("Finalizing video...", toolbar)
+        self._status_label.setObjectName("recordingStatusLabel")
+        self._status_label.setVisible(False)
+        layout.addWidget(self._status_label)
+
         self._pause_btn = QToolButton(toolbar)
         self._pause_btn.setIconSize(QSize(17, 17))
         self._pause_btn.setFixedSize(30, 28)
@@ -1254,13 +1309,13 @@ class RecordingAnnotationOverlay(QWidget):
         layout.addWidget(self._pause_btn)
         self.set_paused(self._paused)
 
-        stop_btn = QToolButton(toolbar)
-        stop_btn.setIcon(ui_icon("stop"))
-        stop_btn.setIconSize(QSize(17, 17))
-        stop_btn.setFixedSize(30, 28)
-        stop_btn.setToolTip("Stop recording")
-        stop_btn.clicked.connect(self.stop_requested.emit)
-        layout.addWidget(stop_btn)
+        self._stop_btn = QToolButton(toolbar)
+        self._stop_btn.setIcon(ui_icon("stop"))
+        self._stop_btn.setIconSize(QSize(17, 17))
+        self._stop_btn.setFixedSize(30, 28)
+        self._stop_btn.setToolTip("Stop recording")
+        self._stop_btn.clicked.connect(self.stop_requested.emit)
+        layout.addWidget(self._stop_btn)
 
         layout.addWidget(self._separator())
 
@@ -1308,6 +1363,10 @@ class RecordingAnnotationOverlay(QWidget):
                 background: {hover};
                 border-color: #777;
             }}
+            QToolButton:disabled, QPushButton:disabled {{
+                color: #777;
+                border-color: transparent;
+            }}
             QToolButton:checked {{
                 background: #0078D4;
                 border-color: #0078D4;
@@ -1316,6 +1375,11 @@ class RecordingAnnotationOverlay(QWidget):
             QLabel {{
                 color: {text};
                 font-size: 11px;
+            }}
+            QLabel#recordingStatusLabel {{
+                color: #9ed8ff;
+                font-weight: bold;
+                padding: 0 7px;
             }}
             QSlider::groove:horizontal {{
                 height: 4px;

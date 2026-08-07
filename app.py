@@ -4,7 +4,7 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
-from PyQt6.QtCore import QRect, QRectF, Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QPointF, QRect, QRectF, Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMessageBox,
@@ -224,6 +224,8 @@ class ClearShotApp:
         self._record_annotation_store: RecordingAnnotationStore | None = None
         self._recorder: ScreenRecorder | None = None
         self._recording_rect: QRect | None = None
+        self._recording_finalizing = False
+        self._recording_finalizing_message = ""
 
         # Ensure DPI awareness
         ensure_dpi_awareness()
@@ -232,6 +234,7 @@ class ClearShotApp:
         self._app_icon = self._create_app_icon()
         self._recording_icon = self._create_recording_tray_icon(paused=False)
         self._paused_recording_icon = self._create_recording_tray_icon(paused=True)
+        self._finalizing_recording_icon = self._create_recording_tray_icon(finalizing=True)
         self._tray = QSystemTrayIcon()
         self._tray.setIcon(self._app_icon)
         self._tray.setToolTip(f"{APP_NAME} v{APP_VERSION}")
@@ -344,7 +347,7 @@ class ClearShotApp:
         painter.end()
         return QIcon(pixmap)
 
-    def _create_recording_tray_icon(self, paused: bool = False) -> QIcon:
+    def _create_recording_tray_icon(self, paused: bool = False, finalizing: bool = False) -> QIcon:
         """Create a tray icon variant with a small recording state badge."""
         size = 64
         pixmap = self._app_icon.pixmap(size, size)
@@ -355,7 +358,12 @@ class ClearShotApp:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        badge_color = QColor("#ffb020" if paused else "#ff3b30")
+        if finalizing:
+            badge_color = QColor("#0099ff")
+        elif paused:
+            badge_color = QColor("#ffb020")
+        else:
+            badge_color = QColor("#ff3b30")
         shadow = QColor(0, 0, 0, 180)
         badge = QRectF(size * 0.58, size * 0.58, size * 0.34, size * 0.34)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -364,7 +372,14 @@ class ClearShotApp:
         painter.setBrush(badge_color)
         painter.drawEllipse(badge)
         painter.setBrush(QColor("#ffffff"))
-        if paused:
+        if finalizing:
+            dot_size = size * 0.045
+            y = badge.center().y() - dot_size / 2
+            for offset in (-0.08, 0, 0.08):
+                dot = QRectF(0, 0, dot_size, dot_size)
+                dot.moveCenter(QPointF(badge.center().x() + size * offset, y + dot_size / 2))
+                painter.drawEllipse(dot)
+        elif paused:
             bar_w = size * 0.045
             bar_h = size * 0.15
             y = badge.center().y() - bar_h / 2
@@ -377,10 +392,14 @@ class ClearShotApp:
         painter.end()
         return QIcon(pixmap)
 
-    def _set_recording_indicator(self, recording: bool, paused: bool = False) -> None:
+    def _set_recording_indicator(self, recording: bool, paused: bool = False, finalizing: bool = False) -> None:
         if recording:
-            self._tray.setIcon(self._paused_recording_icon if paused else self._recording_icon)
-            state = "Paused" if paused else "Recording"
+            if finalizing:
+                self._tray.setIcon(self._finalizing_recording_icon)
+                state = "Finalizing video"
+            else:
+                self._tray.setIcon(self._paused_recording_icon if paused else self._recording_icon)
+                state = "Paused" if paused else "Recording"
             self._tray.setToolTip(f"{APP_NAME} v{APP_VERSION} - {state}")
         else:
             self._tray.setIcon(self._app_icon)
@@ -438,32 +457,37 @@ class ClearShotApp:
         record_menu.setStyleSheet(menu.styleSheet())
 
         if self._is_recording():
-            annotations_visible = bool(
-                self._record_annotation_overlay is not None
-                and self._record_annotation_overlay.isVisible()
-            )
-            annotation_label = "Hide Annotation Tools" if annotations_visible else "Show Annotation Tools"
-            annotation_action = QAction(ui_icon("edit"), annotation_label, record_menu)
-            annotation_action.triggered.connect(self._toggle_recording_annotations)
-            record_menu.addAction(annotation_action)
+            if self._recording_finalizing:
+                finalizing_action = QAction(ui_icon("save"), "Finalizing Recording...", record_menu)
+                finalizing_action.setEnabled(False)
+                record_menu.addAction(finalizing_action)
+            else:
+                annotations_visible = bool(
+                    self._record_annotation_overlay is not None
+                    and self._record_annotation_overlay.isVisible()
+                )
+                annotation_label = "Hide Annotation Tools" if annotations_visible else "Show Annotation Tools"
+                annotation_action = QAction(ui_icon("edit"), annotation_label, record_menu)
+                annotation_action.triggered.connect(self._toggle_recording_annotations)
+                record_menu.addAction(annotation_action)
 
-            if self._record_annotation_overlay is not None:
-                clear_annotation_action = QAction(ui_icon("trash"), "Clear Recording Annotations", record_menu)
-                clear_annotation_action.triggered.connect(self._clear_recording_annotations)
-                record_menu.addAction(clear_annotation_action)
+                if self._record_annotation_overlay is not None:
+                    clear_annotation_action = QAction(ui_icon("trash"), "Clear Recording Annotations", record_menu)
+                    clear_annotation_action.triggered.connect(self._clear_recording_annotations)
+                    record_menu.addAction(clear_annotation_action)
 
-            record_menu.addSeparator()
+                record_menu.addSeparator()
 
-            paused = bool(self._recorder and self._recorder.is_paused)
-            pause_label = "Resume Recording" if paused else "Pause Recording"
-            pause_icon = "play" if paused else "pause"
-            pause_action = QAction(ui_icon(pause_icon), pause_label, record_menu)
-            pause_action.triggered.connect(self._toggle_recording_pause)
-            record_menu.addAction(pause_action)
+                paused = bool(self._recorder and self._recorder.is_paused)
+                pause_label = "Resume Recording" if paused else "Pause Recording"
+                pause_icon = "play" if paused else "pause"
+                pause_action = QAction(ui_icon(pause_icon), pause_label, record_menu)
+                pause_action.triggered.connect(self._toggle_recording_pause)
+                record_menu.addAction(pause_action)
 
-            stop_action = QAction(ui_icon("stop"), "Stop Recording", record_menu)
-            stop_action.triggered.connect(self._stop_recording)
-            record_menu.addAction(stop_action)
+                stop_action = QAction(ui_icon("stop"), "Stop Recording", record_menu)
+                stop_action.triggered.connect(self._stop_recording)
+                record_menu.addAction(stop_action)
         else:
             record_region_action = QAction(ui_icon("capture_region"), "Record Region", record_menu)
             record_region_action.triggered.connect(self._start_region_recording)
@@ -642,6 +666,8 @@ class ClearShotApp:
             ).strip() or SYSTEM_AUDIO_DEFAULT_DEVICE
 
         self._recording_rect = normalize_recording_rect(rect)
+        self._recording_finalizing = False
+        self._recording_finalizing_message = ""
         self._record_annotation_store = RecordingAnnotationStore()
         self._recorder = ScreenRecorder(
             self._recording_rect,
@@ -653,6 +679,7 @@ class ClearShotApp:
             annotation_store=self._record_annotation_store,
         )
         self._recorder.recording_started.connect(lambda path, target=label: self._on_recording_started(path, target))
+        self._recorder.recording_finalizing.connect(self._on_recording_finalizing)
         self._recorder.recording_finished.connect(self._on_recording_finished)
         self._recorder.recording_failed.connect(self._on_recording_failed)
         self._recorder.recording_paused.connect(self._on_recording_paused)
@@ -671,20 +698,28 @@ class ClearShotApp:
 
     def _stop_recording(self):
         if self._recorder is not None and self._recorder.isRunning():
+            if self._recording_finalizing:
+                self._tray.showMessage(
+                    APP_NAME,
+                    self._recording_finalizing_message or "Recording is still finalizing. Longer recordings can take a moment to save.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000,
+                )
+                return
             self._recorder.stop()
-            self._tray.showMessage(
-                APP_NAME,
-                "Stopping screen recording...",
-                QSystemTrayIcon.MessageIcon.Information,
-                1500,
-            )
+            if not self._recording_finalizing:
+                self._on_recording_finalizing("Stopping and finalizing video...")
 
     def _toggle_recording_pause(self):
         if self._recorder is None or not self._recorder.isRunning():
             return
+        if self._recording_finalizing:
+            return
         self._recorder.toggle_pause()
 
     def _on_recording_started(self, path: str, target: str):
+        self._recording_finalizing = False
+        self._recording_finalizing_message = ""
         self._set_recording_indicator(True, False)
         if self._recording_rect is not None:
             if self._config.get("show_recording_border", True):
@@ -698,9 +733,31 @@ class ClearShotApp:
             2500,
         )
 
+    def _on_recording_finalizing(self, message: str):
+        if self._recorder is None:
+            return
+        first_update = not self._recording_finalizing
+        self._recording_finalizing = True
+        self._recording_finalizing_message = message or "Stopping and finalizing video..."
+        self._set_recording_indicator(True, finalizing=True)
+        if self._record_border_overlay is not None:
+            self._record_border_overlay.set_finalizing(True)
+        if self._record_annotation_overlay is not None:
+            self._record_annotation_overlay.set_finalizing(True, self._recording_finalizing_message)
+        self._build_tray_menu()
+        if first_update:
+            self._tray.showMessage(
+                APP_NAME,
+                "Stopping and finalizing video. Longer recordings can take a moment to save.",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
+
     def _on_recording_finished(self, path: str, duration: float, frames: int):
         self._recorder = None
         self._recording_rect = None
+        self._recording_finalizing = False
+        self._recording_finalizing_message = ""
         self._hide_recording_annotations()
         self._record_annotation_store = None
         self._hide_recording_border()
@@ -716,6 +773,8 @@ class ClearShotApp:
     def _on_recording_failed(self, message: str):
         self._recorder = None
         self._recording_rect = None
+        self._recording_finalizing = False
+        self._recording_finalizing_message = ""
         self._hide_recording_annotations()
         self._record_annotation_store = None
         self._hide_recording_border()
@@ -728,6 +787,8 @@ class ClearShotApp:
         )
 
     def _on_recording_paused(self):
+        if self._recording_finalizing:
+            return
         self._set_recording_indicator(True, True)
         if self._record_border_overlay is not None:
             self._record_border_overlay.set_paused(True)
@@ -736,6 +797,8 @@ class ClearShotApp:
         self._build_tray_menu()
 
     def _on_recording_resumed(self):
+        if self._recording_finalizing:
+            return
         self._set_recording_indicator(True, False)
         if self._record_border_overlay is not None:
             self._record_border_overlay.set_paused(False)
@@ -781,6 +844,10 @@ class ClearShotApp:
         else:
             self._record_annotation_overlay.set_hold_key(hold_key)
         self._record_annotation_overlay.set_paused(bool(self._recorder and self._recorder.is_paused))
+        self._record_annotation_overlay.set_finalizing(
+            self._recording_finalizing,
+            self._recording_finalizing_message,
+        )
         self._record_annotation_overlay.show()
         self._record_annotation_overlay.raise_()
         if activate:
@@ -810,9 +877,13 @@ class ClearShotApp:
             self._record_annotation_overlay.clear_all()
 
     def _show_recording_busy_message(self):
+        if self._recording_finalizing:
+            message = "Recording is finalizing. Longer recordings can take a moment to save."
+        else:
+            message = "A screen recording is already running."
         self._tray.showMessage(
             APP_NAME,
-            "A screen recording is already running.",
+            message,
             QSystemTrayIcon.MessageIcon.Information,
             2000,
         )
