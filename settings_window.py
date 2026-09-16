@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox,
     QFileDialog, QFormLayout, QGroupBox, QMessageBox,
     QKeySequenceEdit, QSpacerItem, QSizePolicy, QFrame,
-    QScrollArea,
+    QScrollArea, QToolButton,
 )
 from constants import (
     APP_NAME,
@@ -27,13 +27,16 @@ from constants import (
     VIDEO_FORMATS,
 )
 from icon_utils import ui_icon
+from config import validate_save_directory
 from recording import (
     AUDIO_MODE_MICROPHONE,
     AUDIO_MODE_NONE,
     AUDIO_MODE_SYSTEM,
     SYSTEM_AUDIO_DEFAULT_DEVICE,
-    list_audio_sources,
+    list_microphone_devices,
     list_system_audio_sources,
+    resolve_microphone,
+    resolve_system_speaker,
 )
 
 GITHUB_REPO = "GoblinRules/ClearShot"
@@ -351,23 +354,27 @@ class SettingsWindow(QDialog):
 
         self._recording_audio_source_combo = QComboBox()
         self._recording_audio_source_combo.setEditable(False)
+        self._recording_audio_source_combo.setAccessibleName("Microphone input")
+        self._recording_audio_source_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._recording_audio_source_combo.setMinimumContentsLength(20)
         self._recording_audio_source_combo.setToolTip("Choose the microphone input to record.")
-        self._microphone_sources = list_audio_sources()
-        if self._microphone_sources:
-            self._recording_audio_source_combo.addItem("Select microphone input", "")
-            for source in self._microphone_sources:
-                self._recording_audio_source_combo.addItem(source, source)
-        else:
-            self._recording_audio_source_combo.addItem("No microphone inputs found", "")
-        recording_layout.addRow("Microphone:", self._recording_audio_source_combo)
+        microphone_row = QHBoxLayout()
+        microphone_row.addWidget(self._recording_audio_source_combo, 1)
+        self._refresh_audio_btn = QToolButton()
+        self._refresh_audio_btn.setIcon(ui_icon("refresh"))
+        self._refresh_audio_btn.setToolTip("Refresh audio devices")
+        self._refresh_audio_btn.setAccessibleName("Refresh audio devices")
+        self._refresh_audio_btn.setFixedSize(32, 32)
+        self._refresh_audio_btn.clicked.connect(self._reload_audio_devices)
+        microphone_row.addWidget(self._refresh_audio_btn)
+        recording_layout.addRow("Microphone:", microphone_row)
 
         self._recording_system_audio_combo = QComboBox()
-        self._recording_system_audio_combo.addItem("Default output device", SYSTEM_AUDIO_DEFAULT_DEVICE)
-        for name, device_id in list_system_audio_sources():
-            self._recording_system_audio_combo.addItem(name, device_id)
+        self._recording_system_audio_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._recording_system_audio_combo.setMinimumContentsLength(20)
         recording_layout.addRow("System audio:", self._recording_system_audio_combo)
 
-        audio_note = QLabel("Microphone uses Windows DirectShow input devices. System audio records the selected output device through Windows loopback.")
+        audio_note = QLabel("Microphone and system audio use Windows audio devices. Pausing excludes both audio and video from the recording.")
         audio_note.setWordWrap(True)
         audio_note.setStyleSheet("color: #888; font-style: italic;")
         recording_layout.addRow("", audio_note)
@@ -510,6 +517,8 @@ class SettingsWindow(QDialog):
               <td><code style="background: #333; padding: 2px 8px; border-radius: 3px;">Ctrl + Alt + Shift + X</code></td></tr>
         </table>
         <p style="color: #aaa; margin-left: 8px;">Recordings can use a separate save folder, MP4 or MKV export, a visible recording border, hold-to-draw annotation input, microphone input, or system audio from a selected output device.</p>
+        <p style="color: #aaa; margin-left: 8px;">Pause excludes both audio and video, and freezes the recording timer. Stop shows finalizing/exporting status until the file is saved. Use the refresh icon beside Microphone after reconnecting a device; unavailable inputs cannot be used.</p>
+        <p style="color: #aaa; margin-left: 8px;">If recording or export fails, the error shows a ClearShot_recovery_ folder inside your recording save location. Keep its video.mkv and audio.wav until you have recovered what you need. Successful exports remove their temporary files.</p>
 
         <h3 style="color: #0099FF;">Region Capture</h3>
         <ol style="color: #ccc; margin-left: 8px;">
@@ -637,9 +646,41 @@ class SettingsWindow(QDialog):
         mode = self._recording_audio_mode_combo.currentData()
         self._recording_audio_source_combo.setEnabled(mode == AUDIO_MODE_MICROPHONE)
         self._recording_system_audio_combo.setEnabled(mode == AUDIO_MODE_SYSTEM)
-        if mode == AUDIO_MODE_MICROPHONE and not self._selected_microphone_source():
-            if self._recording_audio_source_combo.count() > 1:
-                self._recording_audio_source_combo.setCurrentIndex(1)
+
+    def _reload_audio_devices(self):
+        self._populate_audio_devices(
+            self._selected_microphone_source(),
+            self._recording_system_audio_combo.currentData(),
+        )
+
+    def _populate_audio_devices(self, microphone, system):
+        self._microphone_sources = list_microphone_devices()
+        microphones = self._recording_audio_source_combo
+        microphones.clear()
+        microphones.addItem("Select microphone input" if self._microphone_sources else "No microphone inputs found", "")
+        for name, device_id in self._microphone_sources:
+            microphones.addItem(name, device_id)
+        self._select_audio_device(microphones, microphone)
+        outputs = self._recording_system_audio_combo
+        outputs.clear()
+        outputs.addItem("Default output device", SYSTEM_AUDIO_DEFAULT_DEVICE)
+        for name, device_id in list_system_audio_sources():
+            outputs.addItem(name, device_id)
+        self._select_audio_device(outputs, system)
+        self._refresh_audio_source_enabled()
+
+    @staticmethod
+    def _select_audio_device(combo, selected):
+        index = combo.findData(selected)
+        if index < 0 and selected:
+            # Migrate old selections stored as friendly DirectShow names.
+            matches = [i for i in range(combo.count()) if combo.itemText(i) == selected]
+            index = matches[0] if len(matches) == 1 else -1
+        if index < 0 and selected:
+            combo.addItem(f"{selected} (unavailable)", selected)
+            index = combo.count() - 1
+            combo.model().item(index).setEnabled(False)
+        combo.setCurrentIndex(max(0, index))
 
     def _selected_microphone_source(self) -> str:
         data = self._recording_audio_source_combo.currentData()
@@ -683,24 +724,7 @@ class SettingsWindow(QDialog):
         audio_source = self._config.get("recording_microphone_source", "")
         if not audio_source:
             audio_source = self._config.get("recording_audio_source", "")
-        audio_source_idx = self._recording_audio_source_combo.findData(audio_source)
-        if audio_source_idx >= 0:
-            self._recording_audio_source_combo.setCurrentIndex(audio_source_idx)
-        elif audio_source:
-            self._recording_audio_source_combo.addItem(audio_source, audio_source)
-            self._recording_audio_source_combo.setCurrentIndex(
-                self._recording_audio_source_combo.count() - 1
-            )
-        elif audio_mode == AUDIO_MODE_MICROPHONE and self._recording_audio_source_combo.count() > 1:
-            self._recording_audio_source_combo.setCurrentIndex(1)
-        else:
-            self._recording_audio_source_combo.setCurrentIndex(0)
-
-        system_audio_device = self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE)
-        system_audio_idx = self._recording_system_audio_combo.findData(system_audio_device)
-        if system_audio_idx >= 0:
-            self._recording_system_audio_combo.setCurrentIndex(system_audio_idx)
-        self._refresh_audio_source_enabled()
+        self._populate_audio_devices(audio_source, self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE))
         self._hotkey_region._value = self._config.get_hotkey("region_capture")
         self._hotkey_region._display.setText(self._config.get_hotkey("region_capture"))
         self._hotkey_fullscreen._value = self._config.get_hotkey("fullscreen_capture")
@@ -730,10 +754,22 @@ class SettingsWindow(QDialog):
 
     def _save_and_close(self):
         """Save all settings and close the dialog."""
-        self._config.set("save_path", self._save_path_edit.text())
+        try:
+            save_path = validate_save_directory(self._save_path_edit.text(), "Screenshot save location")
+            recording_path = validate_save_directory(self._recording_path_edit.text(), "Recording save location")
+            mode = self._recording_audio_mode_combo.currentData()
+            if mode == AUDIO_MODE_MICROPHONE:
+                resolve_microphone(self._selected_microphone_source())
+            elif mode == AUDIO_MODE_SYSTEM:
+                if resolve_system_speaker(self._recording_system_audio_combo.currentData()) is None:
+                    raise ValueError("No system audio output device is available.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Check Recording Settings", str(exc))
+            return
+        self._config.set("save_path", save_path)
         self._config.set("image_format", self._format_combo.currentText())
         self._config.set("filename_pattern", self._pattern_edit.text())
-        self._config.set("recording_save_path", self._recording_path_edit.text())
+        self._config.set("recording_save_path", recording_path)
         self._config.set("recording_format", self._recording_format_combo.currentText())
         self._config.set("recording_fps", int(self._recording_fps_combo.currentText()))
         self._config.set("show_recording_border", self._show_recording_border_cb.isChecked())

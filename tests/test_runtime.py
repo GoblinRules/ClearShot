@@ -123,7 +123,7 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(len(frames), 12)
                 self.assertGreater(max(frames[0]), 100)
 
-    def test_microphone_capture_exception_reaps_encoder(self):
+    def test_capture_exception_reaps_encoder(self):
         with tempfile.TemporaryDirectory(prefix='clearshot_test_') as folder:
             recorder = ScreenRecorder(QRect(0, 0, 64, 64), str(Path(folder) / 'failed.mp4'),
                                       audio_mode=AUDIO_MODE_MICROPHONE,
@@ -136,10 +136,10 @@ class RuntimeTests(unittest.TestCase):
                 children.append(child)
                 return child
 
-            with patch('recording.subprocess.Popen', side_effect=spawn), \
+            with patch('recording_backend.subprocess.Popen', side_effect=spawn), \
                     patch.object(recorder, '_capture_loop', side_effect=RuntimeError('capture failed')):
                 with self.assertRaisesRegex(RuntimeError, 'capture failed'):
-                    recorder._run_with_microphone()
+                    recorder._run_silent(str(Path(folder) / 'video.mkv'))
             self.assertTrue(children)
             self.assertTrue(all(child.poll() is not None for child in children))
             self.assertTrue(all(child.stdin is None or child.stdin.closed for child in children))

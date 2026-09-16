@@ -1,31 +1,36 @@
-# ClearShot v1.3.13
+# ClearShot v1.3.14
 
 ## Fixed
 
-- The full installer now installs the runtime alongside the app. Installed copies no longer unpack into a new `_MEI` temporary folder on each launch, and temp-folder cleaners cannot remove their runtime dependencies.
-- Reduced bundled dependencies by collecting only the Qt modules used by ClearShot.
-- Fixed shutdown while recording: the app stays responsive and retains recording workers until finalization finishes, avoiding destruction of a running Qt thread.
-- Fixed hotkey shutdown during startup and corrected Windows handle declarations for the single-instance check. Duplicate launches exit immediately.
-- Installer upgrades request a clean exit instead of force-killing ClearShot. Older versions must be exited from the tray before upgrading.
-- Microphone recording continuously drains encoder errors and reaps the encoder on capture failures.
-- Recording checks available space on the save drive and reports an error below 256 MB free.
-- Added rotating local application logs and native crash diagnostics under `%LOCALAPPDATA%\ClearShot\logs`.
+- Recording and export processes now have bounded waits, continuously drained diagnostics, and checked exit codes. A stalled encoder cannot leave Stop waiting forever, and a failed encoder no longer reports a successful save.
+- Audio or export failures retain intermediate video/audio in a clearly reported recovery folder inside the selected recording directory. Successful exports clean up their working files.
+- Microphone and system audio now follow the same pause-aware timeline as video. Audio capture is reopened after a pause so paused audio is not buffered into the resumed recording.
+- Slow screen capture repeats frames to preserve elapsed duration instead of producing sped-up videos. Excessive encoder lag stops with an actionable error.
+- Microphone selection now uses Windows audio endpoint IDs, supports existing friendly-name selections, marks disconnected devices unavailable, and includes an MDI refresh button. Device availability is checked before recording.
+- Empty or unwritable save locations are rejected before settings are saved. Legacy blank paths recover to defaults, and disconnected save drives no longer prevent startup.
+- The REC counter excludes paused time. Stop continues to show finalizing/exporting status until saving completes.
+
+## Verification
+
+- Automated regression coverage for encoder errors and timeouts, failed-export recovery, audio disconnects, pause privacy, slow capture timing, settings validation, device refresh, and consecutive sessions.
+- MP4/MKV exports verified with microphone and system-audio test sources.
+- Local hardware checks covered three microphone inputs (including a mono endpoint) and default system audio, with pause/resume and decoded output.
+- Real screen-capture tests cover consecutive recordings and quitting during capture.
 
 ## Downloads
 
 | File | Description |
 |------|-------------|
-| **ClearShot_Setup_1.3.13.exe** | Recommended full installer; runs without temporary runtime extraction |
-| **ClearShot_Portable_1.3.13.zip** | Extract the complete folder and run ClearShot.exe; no temporary runtime extraction |
-| **ClearShot.exe** | Standalone portable EXE; still extracts a smaller runtime while running |
+| **ClearShot_Setup_1.3.14.exe** | Recommended full installer; runtime stays in the install directory |
+| **ClearShot_Portable_1.3.14.zip** | Extract the complete folder and run ClearShot.exe |
+| **ClearShot.exe** | Standalone portable EXE; extracts a temporary runtime while running |
+| **SHA256SUMS.txt** | Checksums for the downloads |
 
 ## Notes
 
-- Exit any older ClearShot instance before installing this update.
-- Single-file portable apps use a launcher plus an application process. That pair is expected; it does not indicate a restart loop.
-- `_MEI` folders can belong to any PyInstaller application. Do not delete an active application's runtime folder, or assume every `_MEI` folder belongs to ClearShot.
-
-## Requirements
-
-- Windows 10/11
-- No additional dependencies needed
+- Close older copies of ClearShot before upgrading. The installer requests a clean shutdown from recent versions.
+- After reconnecting a microphone, refresh audio devices in Settings and choose the required input.
+- Failed/interrupted recordings may leave a `ClearShot_recovery_*` folder beside your recordings. Recover any needed media before deleting it; do not delete an active recording's folder.
+- Temporary stereo audio uses about 660 MiB per recording hour. Allow space for the working files and final export.
+- The installer and portable ZIP do not extract runtime files into Windows Temp. A standalone portable EXE normally has a launcher and an application process.
+- Windows 10/11; no additional dependencies needed.

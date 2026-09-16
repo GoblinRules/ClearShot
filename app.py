@@ -35,7 +35,8 @@ from recording import (
     RecordingSelectionOverlay,
     ScreenRecorder,
     SYSTEM_AUDIO_DEFAULT_DEVICE,
-    list_audio_sources,
+    resolve_microphone,
+    resolve_system_speaker,
     make_recording_path,
     normalize_recording_rect,
 )
@@ -672,8 +673,12 @@ class ClearShotApp:
         pattern = self._config.get("filename_pattern", "ClearShot_{timestamp}")
         recording_format = self._config.get("recording_format", "MP4")
         extension = VIDEO_FORMATS.get(recording_format, VIDEO_FORMATS["MP4"])
-        output_path = make_recording_path(save_path, f"{pattern}_Recording", extension)
-        fps = int(self._config.get("recording_fps", 15))
+        try:
+            output_path = make_recording_path(save_path, f"{pattern}_Recording", extension)
+            fps = int(self._config.get("recording_fps", 15))
+        except (ValueError, TypeError, OSError) as exc:
+            QMessageBox.warning(None, "Check Recording Settings", str(exc))
+            return
         audio_mode = self._get_recording_audio_mode()
         microphone_source = ""
         system_audio_device = SYSTEM_AUDIO_DEFAULT_DEVICE
@@ -681,23 +686,25 @@ class ClearShotApp:
             microphone_source = str(self._config.get("recording_microphone_source", "")).strip()
             if not microphone_source:
                 microphone_source = str(self._config.get("recording_audio_source", "")).strip()
-            if not microphone_source:
-                available_microphones = list_audio_sources()
-                if available_microphones:
-                    microphone_source = available_microphones[0]
-                    self._config.set("recording_microphone_source", microphone_source)
-                    self._config.set("recording_audio_source", microphone_source)
-            if not microphone_source:
+            try:
+                resolve_microphone(microphone_source)
+            except Exception as exc:
                 QMessageBox.warning(
                     None,
                     "Recording Microphone Required",
-                    "Choose a microphone input in Settings before recording with microphone audio.",
+                    str(exc),
                 )
                 return
         elif audio_mode == AUDIO_MODE_SYSTEM:
             system_audio_device = str(
                 self._config.get("recording_system_audio_device", SYSTEM_AUDIO_DEFAULT_DEVICE)
             ).strip() or SYSTEM_AUDIO_DEFAULT_DEVICE
+            try:
+                if resolve_system_speaker(system_audio_device) is None:
+                    raise RuntimeError("No system audio output device is available.")
+            except Exception as exc:
+                QMessageBox.warning(None, "Recording Audio Unavailable", str(exc))
+                return
 
         self._recording_rect = normalize_recording_rect(rect)
         self._recording_finalizing = False
@@ -894,7 +901,8 @@ class ClearShotApp:
 
     def _show_recording_border(self, rect: QRect) -> None:
         self._hide_recording_border()
-        self._record_border_overlay = RecordingBorderOverlay(rect)
+        recorder = self._recorder
+        self._record_border_overlay = RecordingBorderOverlay(rect, elapsed=lambda: recorder.elapsed)
         self._record_border_overlay.show()
         self._record_border_overlay.raise_()
 

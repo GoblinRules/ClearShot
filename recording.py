@@ -6,15 +6,11 @@ import datetime
 import ctypes
 import ctypes.wintypes as wintypes
 import os
-import re
-import subprocess
 import tempfile
 import threading
 import time
-import wave
 import logging
 import shutil
-from collections import deque
 from threading import Event
 
 import imageio_ffmpeg
@@ -43,7 +39,6 @@ from constants import (
     DEFAULT_PEN_COLOR,
     DEFAULT_PEN_WIDTH,
     DEFAULT_RECORDING_ANNOTATION_HOLD_KEY,
-    DEFAULT_SAVE_DIR,
     TOOL_ARROW,
     TOOL_COUNTER,
     TOOL_ELLIPSE,
@@ -54,6 +49,8 @@ from constants import (
     TOOL_TEXT,
 )
 from icon_utils import ui_icon
+from config import validate_save_directory
+from recording_backend import AudioRecorder, EncoderProcess, RecordingClock, frames_for_duration
 from tools import (
     ArrowItem,
     CounterItem,
@@ -154,8 +151,7 @@ def make_recording_path(
     extension: str = ".mp4",
 ) -> str:
     """Create a unique recording path in the configured save directory."""
-    folder = save_dir or DEFAULT_SAVE_DIR
-    os.makedirs(folder, exist_ok=True)
+    folder = validate_save_directory(save_dir, "Recording save location")
     ext = extension if extension.startswith(".") else f".{extension}"
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -198,60 +194,26 @@ def normalize_recording_rect(rect: QRect) -> QRect:
     return QRect(r.x(), r.y(), max(2, width), max(2, height))
 
 
-def _subprocess_creationflags() -> int:
-    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-
-def list_audio_sources(timeout: float = 5.0) -> list[str]:
-    """Return available Windows DirectShow microphone/input device names."""
+def list_microphone_devices() -> list[tuple[str, str]]:
+    """Return live Windows input names and persistent WASAPI endpoint IDs."""
     try:
-        proc = subprocess.run(
-            [
-                imageio_ffmpeg.get_ffmpeg_exe(),
-                "-hide_banner",
-                "-list_devices",
-                "true",
-                "-f",
-                "dshow",
-                "-i",
-                "dummy",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            creationflags=_subprocess_creationflags(),
-        )
+        import soundcard as sc
+        return [(str(mic.name), str(mic.id)) for mic in sc.all_microphones(include_loopback=False)]
     except Exception:
+        logging.exception("Could not enumerate microphones")
         return []
 
-    text = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
-    return _parse_directshow_audio_sources(text)
 
-
-def _parse_directshow_audio_sources(text: str) -> list[str]:
-    """Extract DirectShow audio device names from ffmpeg device-list output."""
-    in_audio_section = False
-    names: list[str] = []
-    for line in text.splitlines():
-        lower = line.lower()
-        if "directshow audio devices" in lower:
-            in_audio_section = True
-            continue
-        if "directshow video devices" in lower:
-            in_audio_section = False
-            continue
-        if "alternative name" in lower:
-            continue
-        if not in_audio_section and "(audio)" not in lower:
-            continue
-
-        match = re.search(r'"([^"]+)"', line)
-        if match:
-            name = match.group(1).strip()
-            if name and name not in names:
-                names.append(name)
-    return names
+def resolve_microphone(selected: str):
+    import soundcard as sc
+    microphones = sc.all_microphones(include_loopback=False)
+    for mic in microphones:
+        if str(mic.id) == selected:
+            return mic
+    matches = [mic for mic in microphones if str(mic.name) == selected]
+    if len(matches) == 1:
+        return matches[0]
+    raise RuntimeError("The selected microphone is unavailable. Reconnect it or choose another input in Settings.")
 
 
 def list_system_audio_sources() -> list[tuple[str, str]]:
@@ -276,7 +238,7 @@ def list_system_audio_sources() -> list[tuple[str, str]]:
     return sources
 
 
-def _resolve_system_speaker(device_id: str | None):
+def resolve_system_speaker(device_id: str | None):
     import soundcard as sc
 
     selected = (device_id or "").strip()
@@ -361,70 +323,8 @@ class RecordingAnnotationStore:
             item.render(painter)
 
 
-class _SystemAudioRecorder(threading.Thread):
-    """Record Windows output-loopback audio to a temporary WAV file."""
-
-    def __init__(
-        self,
-        path: str,
-        device_id: str | None,
-        stop_event: Event,
-        pause_event: Event,
-        sample_rate: int = 48000,
-        channels: int = 2,
-    ):
-        super().__init__(daemon=True)
-        self.path = path
-        self.device_id = device_id or SYSTEM_AUDIO_DEFAULT_DEVICE
-        self.stop_event = stop_event
-        self.pause_event = pause_event
-        self.sample_rate = sample_rate
-        self.channels = channels
-        self.frames = 0
-        self.error = ""
-
-    def run(self) -> None:
-        try:
-            import numpy as np
-            import soundcard as sc
-
-            speaker = _resolve_system_speaker(self.device_id)
-            loopback = sc.get_microphone(id=speaker.id, include_loopback=True)
-            block_size = 1024
-
-            with wave.open(self.path, "wb") as wav_file:
-                wav_file.setnchannels(self.channels)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(self.sample_rate)
-
-                with loopback.recorder(
-                    samplerate=self.sample_rate,
-                    channels=self.channels,
-                    blocksize=block_size,
-                ) as recorder:
-                    while not self.stop_event.is_set():
-                        if self.pause_event.is_set():
-                            self.stop_event.wait(0.05)
-                            continue
-
-                        data = recorder.record(numframes=block_size)
-                        if data is None or len(data) == 0:
-                            continue
-                        if data.ndim == 1:
-                            data = data.reshape(-1, 1)
-                        if data.shape[1] < self.channels:
-                            data = np.repeat(data[:, :1], self.channels, axis=1)
-                        data = data[:, :self.channels]
-                        pcm = np.clip(data, -1.0, 1.0)
-                        pcm = (pcm * 32767.0).astype("<i2", copy=False)
-                        wav_file.writeframes(pcm.tobytes())
-                        self.frames += len(pcm)
-        except Exception as exc:
-            self.error = str(exc) or "System audio recording failed."
-
-
 class ScreenRecorder(QThread):
-    """Capture a screen rectangle to a video file on a worker thread."""
+    """Capture a screen rectangle with recoverable, bounded finalization."""
 
     recording_started = pyqtSignal(str)
     recording_finalizing = pyqtSignal(str)
@@ -433,16 +333,10 @@ class ScreenRecorder(QThread):
     recording_paused = pyqtSignal()
     recording_resumed = pyqtSignal()
 
-    def __init__(
-        self,
-        rect: QRect,
-        output_path: str,
-        fps: int = 15,
-        audio_mode: str = AUDIO_MODE_NONE,
-        microphone_source: str | None = None,
-        system_audio_device: str | None = None,
-        annotation_store: RecordingAnnotationStore | None = None,
-    ):
+    def __init__(self, rect: QRect, output_path: str, fps: int = 15,
+                 audio_mode: str = AUDIO_MODE_NONE, microphone_source: str | None = None,
+                 system_audio_device: str | None = None,
+                 annotation_store: RecordingAnnotationStore | None = None):
         super().__init__()
         self._rect = normalize_recording_rect(rect)
         self._output_path = output_path
@@ -453,11 +347,17 @@ class ScreenRecorder(QThread):
         self._annotation_store = annotation_store
         self._stop_event = Event()
         self._pause_event = Event()
-        self._last_error = ""
+        self._clock = RecordingClock()
+        self._audio_recorder = None
+        self._recovery_dir = None
 
     @property
     def output_path(self) -> str:
         return self._output_path
+
+    @property
+    def elapsed(self) -> float:
+        return self._clock.snapshot()[0]
 
     @property
     def is_paused(self) -> bool:
@@ -468,51 +368,111 @@ class ScreenRecorder(QThread):
         return self._stop_event.is_set()
 
     def pause(self) -> None:
-        if not self._pause_event.is_set():
+        if not self.is_stopping and not self.is_paused:
+            self._clock.pause()
             self._pause_event.set()
             self.recording_paused.emit()
 
     def resume(self) -> None:
-        if self._pause_event.is_set():
+        if not self.is_stopping and self.is_paused:
+            self._clock.resume()
             self._pause_event.clear()
             self.recording_resumed.emit()
 
     def toggle_pause(self) -> bool:
         if self.is_paused:
             self.resume()
-            return False
-        self.pause()
-        return True
+        else:
+            self.pause()
+        return self.is_paused
 
     def stop(self) -> None:
-        if not self._stop_event.is_set():
+        if not self.is_stopping:
             self.recording_finalizing.emit("Stopping and finalizing video...")
-        self._stop_event.set()
-        self._pause_event.clear()
+            self._clock.stop()
+            self._stop_event.set()
+            self._pause_event.clear()
 
     def run(self) -> None:
         ensure_dpi_awareness()
-        started_at = time.perf_counter()
-
         try:
             self._check_disk_space()
             logging.info('Recording started (%s, %s fps)', self._audio_mode, self._fps)
-            self.recording_started.emit(self._output_path)
-            if self._audio_mode == AUDIO_MODE_MICROPHONE:
-                frames = self._run_with_microphone()
-            elif self._audio_mode == AUDIO_MODE_SYSTEM:
-                frames = self._run_with_system_audio()
-            else:
-                frames = self._run_silent()
+            frames = self._record_session()
         except Exception as exc:
-            self._stop_event.set()
+            self.stop()
             logging.exception('Recording failed')
-            self.recording_failed.emit(str(exc) or self._last_error or "Unknown recording error.")
+            message = str(exc) or "Unknown recording error."
+            if self._recovery_dir:
+                message += ("\n\nRecording files were retained in:\n" + self._recovery_dir
+                            + "\nThe video.mkv file may be playable without audio.")
+            self.recording_failed.emit(message)
             return
-
-        duration = max(0.0, time.perf_counter() - started_at)
+        duration = frames / self._fps
         logging.info('Recording finalized: %s frames, %.1f seconds', frames, duration)
         self.recording_finished.emit(self._output_path, duration, frames)
+
+    def _record_session(self) -> int:
+        parent = os.path.dirname(os.path.abspath(self._output_path))
+        self._recovery_dir = tempfile.mkdtemp(prefix="ClearShot_recovery_", dir=parent)
+        video_path = os.path.join(self._recovery_dir, "video.mkv")
+        audio_path = os.path.join(self._recovery_dir, "audio.wav")
+        extension = os.path.splitext(self._output_path)[1].lower()
+        if extension not in {".mp4", ".mkv"}:
+            raise RuntimeError("Choose MP4 or MKV as the recording export format.")
+        export_path = os.path.join(self._recovery_dir, "export" + extension)
+        if self._audio_mode in {AUDIO_MODE_MICROPHONE, AUDIO_MODE_SYSTEM}:
+            self._audio_recorder = AudioRecorder(
+                audio_path, self._resolve_audio_device, self._clock, self._stop_event,
+            )
+            self._audio_recorder.start()
+        try:
+            if self._audio_recorder:
+                if not self._audio_recorder.ready.wait(10):
+                    raise RuntimeError("The audio device did not respond within 10 seconds.")
+                self._check_audio()
+            frames = self._run_silent(video_path)
+        finally:
+            self.stop()
+            if self._audio_recorder:
+                self._audio_recorder.join(timeout=5)
+        if self._audio_recorder:
+            if self._audio_recorder.is_alive():
+                raise RuntimeError("The audio device did not stop. Recording files have been retained.")
+            self._check_audio()
+            if self._audio_recorder.frames <= 0:
+                raise RuntimeError("The audio device did not produce any samples. Recording files have been retained.")
+        if frames <= 0:
+            raise RuntimeError("Recording stopped before any video frames were captured.")
+        self._check_disk_space()
+        self.recording_finalizing.emit("Exporting recording...")
+        self._export(video_path, audio_path if self._audio_recorder else None, export_path, frames)
+        if not os.path.isfile(export_path) or os.path.getsize(export_path) == 0:
+            raise RuntimeError("The encoder did not produce a video file.")
+        os.replace(export_path, self._output_path)
+        # Only this session's files, only after a successful export and closed audio.
+        try:
+            shutil.rmtree(self._recovery_dir)
+        except OSError:
+            logging.warning("Could not remove completed recording workspace: %s", self._recovery_dir)
+        self._recovery_dir = None
+        return frames
+
+    def _resolve_audio_device(self):
+        if self._audio_mode == AUDIO_MODE_MICROPHONE:
+            return resolve_microphone(self._microphone_source)
+        import soundcard as sc
+        speaker = resolve_system_speaker(self._system_audio_device)
+        if speaker is None:
+            raise RuntimeError("No system audio output device is available.")
+        return sc.get_microphone(id=speaker.id, include_loopback=True)
+
+    def _check_audio(self):
+        audio = self._audio_recorder
+        if audio and audio.error:
+            raise RuntimeError("Audio recording failed: " + audio.error)
+        if audio and not self.is_stopping and time.monotonic() - audio.last_activity > 10:
+            raise RuntimeError("The audio device stopped responding.")
 
     def _check_disk_space(self) -> None:
         folder = os.path.dirname(os.path.abspath(self._output_path))
@@ -521,43 +481,50 @@ class ScreenRecorder(QThread):
 
     def _capture_loop(self, send_frame) -> int:
         frames = 0
-        region = {
-            "left": self._rect.x(),
-            "top": self._rect.y(),
-            "width": self._rect.width(),
-            "height": self._rect.height(),
-        }
-        frame_interval = 1.0 / self._fps
-        next_frame_at = time.perf_counter()
+        region = dict(left=self._rect.x(), top=self._rect.y(),
+                      width=self._rect.width(), height=self._rect.height())
         next_space_check = 0.0
-
+        last_frame = None
+        self._clock.start()
         with mss.mss() as sct:
-            while not self._stop_event.is_set():
-                if time.perf_counter() >= next_space_check:
+            while not self.is_stopping:
+                self._check_audio()
+                if time.monotonic() >= next_space_check:
                     self._check_disk_space()
-                    next_space_check = time.perf_counter() + 1.0
-                if self._pause_event.is_set():
-                    self._stop_event.wait(0.05)
-                    next_frame_at = time.perf_counter()
+                    next_space_check = time.monotonic() + 1.0
+                elapsed, active, epoch = self._clock.snapshot()
+                if not active:
+                    self._stop_event.wait(0.02)
                     continue
-
+                if frames > elapsed * self._fps:
+                    self._stop_event.wait(min(0.02, frames / self._fps - elapsed))
+                    continue
                 screenshot = sct.grab(region)
                 frame = self._compose_annotation_frame(screenshot.rgb)
-                send_frame(frame)
+                elapsed, active, after_epoch = self._clock.snapshot()
+                if epoch != after_epoch or not active:
+                    continue
+                target = frames_for_duration(elapsed, self._fps)
+                if target - frames > self._fps * 5:
+                    raise RuntimeError("The encoder cannot keep up. Try a smaller recording area or lower frame rate.")
+                # Keep wall-clock duration when capture is slow, without queuing images.
+                while frames < max(1, target):
+                    send_frame(last_frame if last_frame is not None and frames < target - 1 else frame)
+                    frames += 1
+                last_frame = frame
+        # Stop/pause may interrupt a capture. Finish only the already elapsed timeline.
+        target = frames_for_duration(self.elapsed, self._fps)
+        if last_frame is not None:
+            if target - frames > self._fps * 5:
+                raise RuntimeError("The encoder fell too far behind to finish this recording.")
+            while frames < target:
+                send_frame(last_frame)
                 frames += 1
-
-                next_frame_at += frame_interval
-                delay = next_frame_at - time.perf_counter()
-                if delay > 0:
-                    self._stop_event.wait(delay)
-                else:
-                    next_frame_at = time.perf_counter()
         return frames
 
     def _compose_annotation_frame(self, rgb_data: bytes) -> bytes:
         if self._annotation_store is None or not self._annotation_store.has_items():
             return rgb_data
-
         width = self._rect.width()
         height = self._rect.height()
         image = QImage(rgb_data, width, height, width * 3, QImage.Format.Format_RGB888).copy()
@@ -569,225 +536,62 @@ class ScreenRecorder(QThread):
             painter.end()
         return _qimage_rgb_bytes(image)
 
-    def _run_silent(self, output_path: str | None = None) -> int:
-        target_path = output_path or self._output_path
-        writer = imageio_ffmpeg.write_frames(
-            target_path,
-            (self._rect.width(), self._rect.height()),
-            pix_fmt_in="rgb24",
-            pix_fmt_out="yuv420p",
-            fps=self._fps,
-            quality=8,
-            codec="libx264",
-            macro_block_size=2,
-            ffmpeg_log_level="error",
-        )
+    def _run_silent(self, output_path: str) -> int:
+        encoder = EncoderProcess([
+            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s",
+            f"{self._rect.width()}x{self._rect.height()}", "-r", str(self._fps), "-i", "-",
+            "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-cluster_time_limit", "1000", output_path,
+        ], input_pipe=True)
         try:
-            writer.send(None)
-            frames = self._capture_loop(writer.send)
-            if self._stop_event.is_set():
-                self.recording_finalizing.emit("Finalizing video file...")
+            self._clock.start()
+            self.recording_started.emit(self._output_path)
+            frames = self._capture_loop(encoder.write)
+            self.recording_finalizing.emit("Finalizing video file...")
+            encoder.finish()
             return frames
-        finally:
-            writer.close()
-
-    def _run_with_microphone(self) -> int:
-        command = [
-            imageio_ffmpeg.get_ffmpeg_exe(),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-vcodec",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-s",
-            f"{self._rect.width()}x{self._rect.height()}",
-            "-r",
-            str(self._fps),
-            "-i",
-            "-",
-            "-f",
-            "dshow",
-            "-i",
-            f"audio={self._microphone_source}",
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-shortest",
-            self._output_path,
-        ]
-        proc = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            creationflags=_subprocess_creationflags(),
-        )
-        # Drain stderr continuously: an unread PIPE can block ffmpeg while the
-        # recording thread is blocked writing its next frame to stdin.
-        errors = deque(maxlen=16)
-
-        def drain_errors():
-            while chunk := proc.stderr.read(4096):
-                errors.append(chunk)
-
-        error_reader = threading.Thread(target=drain_errors, daemon=True)
-        error_reader.start()
-        try:
-            if proc.stdin is None:
-                raise RuntimeError("Could not open ffmpeg input pipe.")
-
-            def _send_frame(data: bytes) -> None:
-                if proc.stdin is None:
-                    raise RuntimeError("ffmpeg input pipe closed.")
-                proc.stdin.write(data)
-
-            frames = self._capture_loop(_send_frame)
-            proc.stdin.close()
-            if self._stop_event.is_set():
-                self.recording_finalizing.emit("Finalizing video file...")
-            try:
-                return_code = proc.wait(timeout=60)
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError("The video encoder did not finish within 60 seconds.") from exc
-            error_reader.join(timeout=2)
-            if return_code != 0:
-                error = b''.join(errors).decode('utf-8', errors='replace').strip()
-                raise RuntimeError(error or f"ffmpeg exited with code {return_code}.")
-            return frames
-        except BrokenPipeError as exc:
-            error_reader.join(timeout=2)
-            self._last_error = b''.join(errors).decode('utf-8', errors='replace').strip()
-            raise RuntimeError(self._last_error or "Audio recording failed.") from exc
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait()
-            if proc.stdin is not None:
-                try:
-                    proc.stdin.close()
-                except Exception:
-                    pass
-            error_reader.join(timeout=2)
-            proc.stderr.close()
-
-    def _run_with_system_audio(self) -> int:
-        output_dir = os.path.dirname(os.path.abspath(self._output_path)) or os.getcwd()
-        os.makedirs(output_dir, exist_ok=True)
-        _, extension = os.path.splitext(self._output_path)
-        video_file = tempfile.NamedTemporaryFile(
-            prefix="clearshot_video_",
-            suffix=extension or ".mp4",
-            dir=output_dir,
-            delete=False,
-        )
-        audio_file = tempfile.NamedTemporaryFile(
-            prefix="clearshot_audio_",
-            suffix=".wav",
-            dir=output_dir,
-            delete=False,
-        )
-        temp_video_path = video_file.name
-        temp_audio_path = audio_file.name
-        video_file.close()
-        audio_file.close()
-
-        audio_recorder = _SystemAudioRecorder(
-            temp_audio_path,
-            self._system_audio_device,
-            self._stop_event,
-            self._pause_event,
-        )
-        try:
-            audio_recorder.start()
-            try:
-                frames = self._run_silent(temp_video_path)
-            finally:
-                self._stop_event.set()
-                audio_recorder.join(timeout=5)
-
-            if audio_recorder.error:
-                raise RuntimeError(audio_recorder.error)
-            if audio_recorder.frames <= 0:
-                raise RuntimeError("System audio did not produce any samples.")
-            self.recording_finalizing.emit("Combining audio and video...")
-            self._mux_audio(temp_video_path, temp_audio_path, self._output_path)
-            return frames
-        finally:
-            for path in (temp_video_path, temp_audio_path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-
-    def _mux_audio(self, video_path: str, audio_path: str, output_path: str) -> None:
-        command = [
-            imageio_ffmpeg.get_ffmpeg_exe(),
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            video_path,
-            "-i",
-            audio_path,
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-shortest",
-            output_path,
-        ]
-        proc = subprocess.run(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            creationflags=_subprocess_creationflags(),
-        )
-        if proc.returncode != 0:
-            error = proc.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(error or f"ffmpeg mux exited with code {proc.returncode}.")
-
-    def _read_process_error(self, proc: subprocess.Popen) -> str:
-        if proc.stderr is None:
-            return ""
-        try:
-            data = proc.stderr.read()
         except Exception:
-            return ""
-        if isinstance(data, bytes):
-            text = data.decode("utf-8", errors="replace")
+            self.stop()
+            # Close a healthy encoder so even a capture/disk/audio failure leaves
+            # a playable video. A stalled encoder is still subject to the timeout.
+            try:
+                encoder.finish(timeout=10)
+            except Exception:
+                logging.exception("Could not finalize recovery video")
+            raise
+        finally:
+            encoder.close()
+
+    def _export(self, video_path, audio_path, output_path, frames):
+        command = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
+                   "-i", video_path]
+        if audio_path:
+            command += ["-i", audio_path, "-map", "0:v:0", "-map", "1:a:0",
+                        "-c:a", "aac", "-af", "apad"]
         else:
-            text = str(data)
-        return text.strip()
+            command += ["-map", "0:v:0", "-an"]
+        command += ["-c:v", "copy", "-t", f"{frames / self._fps:.6f}"]
+        if output_path.lower().endswith(".mp4"):
+            command += ["-movflags", "+faststart"]
+        command += ["-progress", "pipe:1", "-nostats", output_path]
+        encoder = EncoderProcess(command, progress=True)
+        try:
+            # Long recordings may take time to encode audio; only advancing output
+            # timestamps renew the deadline, not repeated status messages.
+            encoder.finish(timeout=60)
+        finally:
+            encoder.close()
 
 
 class RecordingBorderOverlay(QWidget):
     """Thin always-on-top border around the active recording area."""
 
-    def __init__(self, rect: QRect, parent=None):
+    def __init__(self, rect: QRect, parent=None, elapsed=None):
         super().__init__(parent)
         self._record_rect = normalize_recording_rect(rect)
         self._started_at = time.perf_counter()
+        self._elapsed = elapsed or (lambda: time.perf_counter() - self._started_at)
         self._paused = False
         self._finalizing = False
         self._thickness = 3
@@ -871,7 +675,7 @@ class RecordingBorderOverlay(QWidget):
         for widget in self._segments:
             widget.setStyleSheet(f"background: {color.name()};")
 
-        elapsed = max(0, int(time.perf_counter() - self._started_at))
+        elapsed = max(0, int(self._elapsed()))
         if self._finalizing:
             label = "FINALIZING"
         elif self._paused:

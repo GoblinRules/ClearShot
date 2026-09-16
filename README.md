@@ -122,6 +122,10 @@ Default recording hotkeys:
 
 Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, hold-to-draw annotation input, microphone input, and system audio from a selected output device.
 
+Microphone choices come from Windows audio endpoints. The refresh icon updates microphone and system-output lists after reconnecting devices. Missing selections are marked unavailable; ClearShot does not silently switch microphones. Previously saved microphone names are recognized when they match an available device.
+
+Pause excludes both audio and video and freezes the REC timer. Under capture load, repeated frames preserve elapsed time instead of speeding up playback. Stop shows finalizing/exporting status; the app checks encoder results before reporting that a file was saved.
+
 ### Region Capture
 
 1. Press `Print Screen` (or your custom hotkey)
@@ -178,11 +182,17 @@ Outputs are `dist/ClearShot.exe` and `dist/ClearShot/`. Compile `installer.iss` 
 
 Run regression checks with `python -m unittest discover -s tests -v`. On Windows, `python tests/smoke_app.py` also verifies real screen capture, pause/resume, consecutive sessions, and quitting during a recording using temporary test videos.
 
+For an opt-in hardware audio check, run `python tests/smoke_recording_audio.py --hardware`. This briefly records each connected microphone and default system audio, tests pause/resume and export, then removes all test media locally.
+
 ### Troubleshooting
 
 Application logs are kept locally in `%LOCALAPPDATA%\ClearShot\logs`. The main log rotates at 1 MB with three backups; native crash reports retain the current and previous run. These files are never uploaded automatically.
 
 If the app is exiting or stopping a recording, let it finish saving. The installer asks a running app to exit cleanly; older versions need to be closed from the tray first.
+
+Recordings use a `ClearShot_recovery_*` working folder inside the selected recording save directory, not Windows Temp. Successful exports remove it. If capture, audio, or export fails, the error reports its location and retains the intermediate `video.mkv` and `audio.wav` when available. Try opening `video.mkv` to recover the silent video. A failed or interrupted recording may be incomplete; these files are not a guarantee of full recovery. After recovering anything needed, you can delete that recording's recovery folder while ClearShot is closed.
+
+Leave enough space on the recording drive for video, uncompressed temporary audio (about 660 MiB per hour), and the final export. ClearShot stops with an error if free space drops below 256 MB. Unavailable save drives no longer prevent startup, but must be reconnected or changed in Settings before saving there.
 
 Do not delete `_MEI` folders used by running applications. These folders are shared naming conventions for PyInstaller programs, not ClearShot-specific files. Use the installer or portable ZIP to avoid depending on Temp for ClearShot's runtime.
 

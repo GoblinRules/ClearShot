@@ -2,6 +2,8 @@
 
 import json
 import os
+import copy
+import tempfile
 from constants import (
     APPDATA_DIR,
     CONFIG_FILE,
@@ -14,6 +16,22 @@ from constants import (
 )
 
 DEFAULT_RECORDING_SAVE_DIR = os.path.join(DEFAULT_SAVE_DIR, "Recordings")
+
+
+def validate_save_directory(value, label="Save location"):
+    folder = str(value or "").strip()
+    if not folder:
+        raise ValueError(f"{label} cannot be empty. Choose a writable folder.")
+    folder = os.path.abspath(os.path.expanduser(folder))
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with tempfile.TemporaryFile(dir=folder) as probe:
+            probe.write(b'ClearShot')
+            probe.flush()
+    except OSError as exc:
+        raise ValueError(f"{label} is unavailable or not writable:\n{folder}\n{exc}") from exc
+    return folder
+
 
 DEFAULT_SETTINGS = {
     "save_path": DEFAULT_SAVE_DIR,
@@ -45,15 +63,17 @@ class Config:
     """Manages application settings with JSON file persistence."""
 
     def __init__(self):
-        self._settings = DEFAULT_SETTINGS.copy()
+        self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         self._ensure_dirs()
         self.load()
 
     def _ensure_dirs(self):
-        """Create required directories if they don't exist."""
+        """Create app data only; removable save drives must not prevent startup."""
         os.makedirs(APPDATA_DIR, exist_ok=True)
-        os.makedirs(self.get("save_path", DEFAULT_SAVE_DIR), exist_ok=True)
-        os.makedirs(self.get("recording_save_path", DEFAULT_RECORDING_SAVE_DIR), exist_ok=True)
+        for key in ("save_path", "recording_save_path"):
+            value = self._settings.get(key)
+            if not isinstance(value, str) or not value.strip():
+                self._settings[key] = DEFAULT_SETTINGS[key]
 
     def load(self):
         """Load settings from the JSON config file."""
@@ -61,14 +81,18 @@ class Config:
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     saved = json.load(f)
+                if not isinstance(saved, dict):
+                    raise ValueError("Settings must be an object")
                 had_audio_mode = "recording_audio_mode" in saved
                 legacy_audio_enabled = bool(saved.get("recording_audio_enabled", False))
                 legacy_audio_source = str(saved.get("recording_audio_source", "") or "")
                 # Merge with defaults (so new keys are always present)
                 for key, value in DEFAULT_SETTINGS.items():
                     if key not in saved:
-                        saved[key] = value
+                        saved[key] = copy.deepcopy(value)
                     elif key == "hotkeys" and isinstance(value, dict):
+                        if not isinstance(saved[key], dict):
+                            saved[key] = {}
                         for hk_key, hk_val in value.items():
                             if hk_key not in saved[key]:
                                 saved[key][hk_key] = hk_val
@@ -77,8 +101,8 @@ class Config:
                 if not saved.get("recording_microphone_source") and legacy_audio_source:
                     saved["recording_microphone_source"] = legacy_audio_source
                 self._settings = saved
-            except (json.JSONDecodeError, IOError):
-                self._settings = DEFAULT_SETTINGS.copy()
+            except (ValueError, IOError):
+                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         self._ensure_dirs()
 
     def save(self):
@@ -112,7 +136,7 @@ class Config:
 
     def reset(self):
         """Reset all settings to defaults."""
-        self._settings = DEFAULT_SETTINGS.copy()
+        self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         self.save()
 
     @property
