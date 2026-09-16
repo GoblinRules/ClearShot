@@ -1,25 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 """ClearShot PyInstaller build spec."""
 
-import os
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-# Collect PyQt6 properly
-pyqt6_datas, pyqt6_binaries, pyqt6_hiddenimports = collect_all('PyQt6')
+# Qt's standard hooks collect only the modules and plugins actually imported.
 ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all('imageio_ffmpeg')
-soundcard_datas, soundcard_binaries, soundcard_hiddenimports = collect_all('soundcard')
+# SoundCard supplies its own data hook; collecting every submodule also bundles
+# its PyInstaller tests and their unrelated test-framework dependencies.
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=pyqt6_binaries + ffmpeg_binaries + soundcard_binaries,
+    binaries=ffmpeg_binaries,
     datas=[
-        ('assets', 'assets'),
-        ('resources', 'resources'),
+        ('assets/icon.ico', 'assets'),
+        ('assets/icon.png', 'assets'),
         ('THIRD_PARTY_NOTICES.md', '.'),
-    ] + pyqt6_datas + ffmpeg_datas + soundcard_datas,
+    ] + ffmpeg_datas,
     hiddenimports=[
         'win32clipboard',
         'win32con',
@@ -29,7 +28,7 @@ a = Analysis(
         'soundcard',
         'cffi',
         'numpy',
-    ] + pyqt6_hiddenimports + ffmpeg_hiddenimports + soundcard_hiddenimports,
+    ] + ffmpeg_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -63,4 +62,25 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/icon.ico',
+)
+
+# The installer and portable ZIP run in place, without extracting into TEMP.
+installed_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='ClearShot',
+    console=False,
+    strip=False,
+    upx=True,
+    icon='assets/icon.ico',
+)
+installed = COLLECT(
+    installed_exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    name='ClearShot',
 )

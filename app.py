@@ -4,6 +4,8 @@ import ctypes
 import ctypes.wintypes
 import os
 import sys
+import logging
+from threading import Event
 from PyQt6.QtCore import QPointF, QRect, QRectF, Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QAction
 from PyQt6.QtWidgets import (
@@ -135,15 +137,20 @@ class HotkeyThread(QThread):
         super().__init__()
         self._config = config
         self._thread_id = None  # set once the thread starts
+        self._stop_requested = Event()
 
     def run(self):
         user32 = ctypes.windll.user32
         self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        # Create the queue and check early stop requests before GetMessage.
+        msg = ctypes.wintypes.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+        if self._stop_requested.is_set():
+            return
         self._register_all(user32)
 
         # Pump messages until told to stop
-        msg = ctypes.wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        while not self._stop_requested.is_set() and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == WM_HOTKEY:
                 hotkey_id = msg.wParam
                 if hotkey_id == _HOTKEY_REGION:
@@ -179,7 +186,7 @@ class HotkeyThread(QThread):
                 continue
             if not user32.RegisterHotKey(None, hotkey_id, mods, vk):
                 print(f"Failed to register {label} hotkey '{key}' "
-                      f"(error {ctypes.GetLastError()})")
+                      f"(error {ctypes.windll.kernel32.GetLastError()})")
             else:
                 print(f"Registered {label} hotkey: {key}")
 
@@ -203,17 +210,21 @@ class HotkeyThread(QThread):
 
     def stop(self):
         """Signal the thread to exit."""
+        self._stop_requested.set()
         if self._thread_id is not None:
             ctypes.windll.user32.PostThreadMessageW(
                 self._thread_id, WM_APP_QUIT, 0, 0,
             )
-        self.wait(3000)
 
 
 class ClearShotApp:
     """Main application class managing the system tray and capture flow."""
 
     def __init__(self):
+        self._quitting = False
+        self._quit_timer = QTimer()
+        self._quit_timer.setInterval(100)
+        self._quit_timer.timeout.connect(self._finish_quit_when_ready)
         self._config = Config()
         self._overlay: SelectionOverlay | None = None
         self._annotator: AnnotatorWindow | None = None
@@ -565,6 +576,8 @@ class ClearShotApp:
 
     def _start_region_capture(self):
         """Start the region selection workflow."""
+        if self._quitting:
+            return
         # Ensure no other overlay is active
         if self._overlay is not None:
             try:
@@ -646,6 +659,8 @@ class ClearShotApp:
 
     def _start_recording_rect(self, rect: QRect, label: str):
         """Start a background recording for the given screen rectangle."""
+        if self._quitting:
+            return
         if self._is_recording():
             self._show_recording_busy_message()
             return
@@ -822,6 +837,8 @@ class ClearShotApp:
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
+        if self._quitting:
+            return
         self._tray.showMessage(
             APP_NAME,
             f"Recording saved: {os.path.basename(path)}",
@@ -842,6 +859,9 @@ class ClearShotApp:
         self._hide_recording_border()
         self._set_recording_indicator(False)
         self._build_tray_menu()
+        if self._quitting:
+            logging.error('Recording failed during shutdown: %s', message)
+            return
         QMessageBox.warning(
             None,
             "Recording Failed",
@@ -1013,7 +1033,24 @@ class ClearShotApp:
 
     def _quit(self):
         """Clean up and exit."""
+        if self._quitting:
+            return
+        self._quitting = True
+        logging.info('Shutdown requested; waiting for recording and hotkey workers')
         self._hotkey_thread.stop()
+        for recorder in [self._recorder, *self._retired_recorders]:
+            if recorder is not None and recorder.isRunning():
+                recorder.stop()
+        self._quit_timer.start()
+        self._finish_quit_when_ready()
+
+    def _finish_quit_when_ready(self):
+        # Destroying a live QThread aborts the process. Keep Qt pumping events
+        # and retain workers while video/audio finalization is still in flight.
+        workers = [self._hotkey_thread, self._recorder, *self._retired_recorders]
+        if any(worker is not None and worker.isRunning() for worker in workers):
+            return
+        self._quit_timer.stop()
         self._tray.hide()
 
         if self._overlay:
@@ -1041,13 +1078,6 @@ class ClearShotApp:
         self._record_annotation_store = None
         if self._record_border_overlay:
             self._hide_recording_border()
-        active_recorders = [rec for rec in [self._recorder, *self._retired_recorders] if rec is not None]
-        for recorder in active_recorders:
-            try:
-                recorder.stop()
-                recorder.wait(5000)
-            except RuntimeError:
-                pass
         self._retired_recorders.clear()
         self._recorder = None
         self._set_recording_indicator(False)

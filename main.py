@@ -6,45 +6,71 @@ Entry point with single-instance lock.
 import sys
 import os
 import ctypes
+from ctypes import wintypes
+import logging
 
 # Ensure the script directory is in the path for local imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from constants import MUTEX_NAME, APP_NAME
 
+_mutex_handle = None
+_shutdown_handle = None
+
+
+def _kernel32():
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateEventW.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    return kernel32
+
 
 def is_already_running() -> bool:
     """Check if another instance of ClearShot is already running using a Windows mutex."""
+    global _mutex_handle
     try:
-        kernel32 = ctypes.windll.kernel32
-        mutex = kernel32.CreateMutexW(None, True, MUTEX_NAME)
-        last_error = ctypes.windll.kernel32.GetLastError()
+        kernel32 = _kernel32()
+        mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+        last_error = ctypes.get_last_error()
+        if not mutex:
+            raise ctypes.WinError(last_error)
         ERROR_ALREADY_EXISTS = 183
         if last_error == ERROR_ALREADY_EXISTS:
             kernel32.CloseHandle(mutex)
             return True
         # Keep the mutex handle alive for the process lifetime
         # (it gets cleaned up automatically when the process exits)
+        _mutex_handle = mutex
         return False
-    except Exception:
+    except AttributeError:
         return False
 
 
 def main():
+    global _shutdown_handle
     # Single-instance check
     if is_already_running():
-        # Show a message using ctypes (no Qt yet)
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            f"{APP_NAME} is already running.\nCheck your system tray.",
-            APP_NAME,
-            0x40,  # MB_ICONINFORMATION
-        )
+        # Exit immediately so duplicate launches release their extracted files.
         sys.exit(0)
+
+    from diagnostics import configure_diagnostics
+    from constants import APP_VERSION
+    try:
+        configure_diagnostics()
+    except OSError:
+        # A full or read-only drive must not prevent screenshots or app startup.
+        logging.exception('Could not initialize local diagnostics')
+    logging.info('Starting ClearShot %s; runtime=%s', APP_VERSION, getattr(sys, '_MEIPASS', 'source'))
 
     # Import Qt after mutex check
     from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QTimer
     
     # Disable Qt's automatic high-DPI scaling so the app works in raw
     # physical pixels — this matches how screen capture APIs (mss, GDI)
@@ -80,8 +106,23 @@ def main():
     from app import ClearShotApp
     tray_app = ClearShotApp()
 
-    sys.exit(app.exec())
+    kernel32 = _kernel32()
+    _shutdown_handle = kernel32.CreateEventW(None, False, False, 'ClearShot_Shutdown_Event')
+    shutdown_timer = QTimer(app)
+    shutdown_timer.timeout.connect(
+        lambda: tray_app._quit() if _shutdown_handle and kernel32.WaitForSingleObject(_shutdown_handle, 0) == 0 else None
+    )
+    shutdown_timer.start(250)
+
+    result = app.exec()
+    logging.info('ClearShot exited cleanly')
+    for handle in (_shutdown_handle, _mutex_handle):
+        if handle:
+            kernel32.CloseHandle(handle)
+    sys.exit(result)
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

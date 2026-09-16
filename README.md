@@ -67,8 +67,10 @@
 ### Option 1: Download a Release
 
 1. Go to the [Releases](https://github.com/GoblinRules/ClearShot/releases) page
-2. Download `ClearShot.exe` for the portable app, or `ClearShot_Setup_<version>.exe` for the full installer
-3. Run the portable app directly, or install it with Start Menu and desktop shortcuts
+2. Download `ClearShot_Setup_<version>.exe` for the recommended full installer, or `ClearShot_Portable_<version>.zip` for a portable folder
+3. Exit any older ClearShot instance from its tray menu, then install or extract the complete portable folder and run `ClearShot.exe`
+
+The installer and portable ZIP run from their own folders and do not extract runtime files into Windows Temp. Keep the portable folder's `_internal` directory alongside the EXE. A standalone `ClearShot.exe` is also available; it extracts a smaller runtime into Temp and normally has two processes (launcher and application).
 
 ### Option 2: Run from Source
 
@@ -168,11 +170,21 @@ Right-click the tray icon → **Settings**, or the settings window offers three 
 # Install PyInstaller
 pip install pyinstaller
 
-# Build single-file portable exe
+# Build the standalone EXE and the runtime folder used by the installer/ZIP
 python -m PyInstaller build.spec --clean -y
 ```
 
-The output will be at `dist/ClearShot.exe`.
+Outputs are `dist/ClearShot.exe` and `dist/ClearShot/`. Compile `installer.iss` with Inno Setup 6 to build the full installer. ZIP the complete `dist/ClearShot/` folder for the portable ZIP.
+
+Run regression checks with `python -m unittest discover -s tests -v`. On Windows, `python tests/smoke_app.py` also verifies real screen capture, pause/resume, consecutive sessions, and quitting during a recording using temporary test videos.
+
+### Troubleshooting
+
+Application logs are kept locally in `%LOCALAPPDATA%\ClearShot\logs`. The main log rotates at 1 MB with three backups; native crash reports retain the current and previous run. These files are never uploaded automatically.
+
+If the app is exiting or stopping a recording, let it finish saving. The installer asks a running app to exit cleanly; older versions need to be closed from the tray first.
+
+Do not delete `_MEI` folders used by running applications. These folders are shared naming conventions for PyInstaller programs, not ClearShot-specific files. Use the installer or portable ZIP to avoid depending on Temp for ClearShot's runtime.
 
 ---
 

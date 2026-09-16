@@ -12,6 +12,9 @@ import tempfile
 import threading
 import time
 import wave
+import logging
+import shutil
+from collections import deque
 from threading import Event
 
 import imageio_ffmpeg
@@ -492,6 +495,8 @@ class ScreenRecorder(QThread):
         started_at = time.perf_counter()
 
         try:
+            self._check_disk_space()
+            logging.info('Recording started (%s, %s fps)', self._audio_mode, self._fps)
             self.recording_started.emit(self._output_path)
             if self._audio_mode == AUDIO_MODE_MICROPHONE:
                 frames = self._run_with_microphone()
@@ -500,11 +505,19 @@ class ScreenRecorder(QThread):
             else:
                 frames = self._run_silent()
         except Exception as exc:
+            self._stop_event.set()
+            logging.exception('Recording failed')
             self.recording_failed.emit(str(exc) or self._last_error or "Unknown recording error.")
             return
 
         duration = max(0.0, time.perf_counter() - started_at)
+        logging.info('Recording finalized: %s frames, %.1f seconds', frames, duration)
         self.recording_finished.emit(self._output_path, duration, frames)
+
+    def _check_disk_space(self) -> None:
+        folder = os.path.dirname(os.path.abspath(self._output_path))
+        if shutil.disk_usage(folder).free < 256 * 1024 * 1024:
+            raise RuntimeError('Recording stopped because the save drive has less than 256 MB free. Free some disk space before recording again.')
 
     def _capture_loop(self, send_frame) -> int:
         frames = 0
@@ -516,9 +529,13 @@ class ScreenRecorder(QThread):
         }
         frame_interval = 1.0 / self._fps
         next_frame_at = time.perf_counter()
+        next_space_check = 0.0
 
         with mss.mss() as sct:
             while not self._stop_event.is_set():
+                if time.perf_counter() >= next_space_check:
+                    self._check_disk_space()
+                    next_space_check = time.perf_counter() + 1.0
                 if self._pause_event.is_set():
                     self._stop_event.wait(0.05)
                     next_frame_at = time.perf_counter()
@@ -545,9 +562,11 @@ class ScreenRecorder(QThread):
         height = self._rect.height()
         image = QImage(rgb_data, width, height, width * 3, QImage.Format.Format_RGB888).copy()
         painter = QPainter(image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self._annotation_store.render(painter)
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self._annotation_store.render(painter)
+        finally:
+            painter.end()
         return _qimage_rgb_bytes(image)
 
     def _run_silent(self, output_path: str | None = None) -> int:
@@ -570,10 +589,7 @@ class ScreenRecorder(QThread):
                 self.recording_finalizing.emit("Finalizing video file...")
             return frames
         finally:
-            try:
-                writer.close()
-            except Exception:
-                pass
+            writer.close()
 
     def _run_with_microphone(self) -> int:
         command = [
@@ -622,6 +638,16 @@ class ScreenRecorder(QThread):
             stderr=subprocess.PIPE,
             creationflags=_subprocess_creationflags(),
         )
+        # Drain stderr continuously: an unread PIPE can block ffmpeg while the
+        # recording thread is blocked writing its next frame to stdin.
+        errors = deque(maxlen=16)
+
+        def drain_errors():
+            while chunk := proc.stderr.read(4096):
+                errors.append(chunk)
+
+        error_reader = threading.Thread(target=drain_errors, daemon=True)
+        error_reader.start()
         try:
             if proc.stdin is None:
                 raise RuntimeError("Could not open ffmpeg input pipe.")
@@ -632,30 +658,33 @@ class ScreenRecorder(QThread):
                 proc.stdin.write(data)
 
             frames = self._capture_loop(_send_frame)
+            proc.stdin.close()
+            if self._stop_event.is_set():
+                self.recording_finalizing.emit("Finalizing video file...")
+            try:
+                return_code = proc.wait(timeout=60)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("The video encoder did not finish within 60 seconds.") from exc
+            error_reader.join(timeout=2)
+            if return_code != 0:
+                error = b''.join(errors).decode('utf-8', errors='replace').strip()
+                raise RuntimeError(error or f"ffmpeg exited with code {return_code}.")
+            return frames
         except BrokenPipeError as exc:
-            self._last_error = self._read_process_error(proc)
+            error_reader.join(timeout=2)
+            self._last_error = b''.join(errors).decode('utf-8', errors='replace').strip()
             raise RuntimeError(self._last_error or "Audio recording failed.") from exc
         finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
             if proc.stdin is not None:
                 try:
                     proc.stdin.close()
                 except Exception:
                     pass
-
-        if self._stop_event.is_set():
-            self.recording_finalizing.emit("Finalizing video file...")
-
-        try:
-            return_code = proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            self._last_error = "ffmpeg did not finish cleanly."
-            raise RuntimeError(self._last_error)
-
-        if return_code != 0:
-            self._last_error = self._read_process_error(proc)
-            raise RuntimeError(self._last_error or f"ffmpeg exited with code {return_code}.")
-        return frames
+            error_reader.join(timeout=2)
+            proc.stderr.close()
 
     def _run_with_system_audio(self) -> int:
         output_dir = os.path.dirname(os.path.abspath(self._output_path)) or os.getcwd()
