@@ -5,7 +5,7 @@
 <h1 align="center">ClearShot</h1>
 
 <p align="center">
-  <b>A lightweight, fast screenshot tool for Windows</b><br>
+  <b>Screenshot capture, annotation, and screen recording for Windows</b><br>
   Capture regions or fullscreen • Annotate with built-in tools • Copy or save instantly
 </p>
 
@@ -16,6 +16,16 @@
 </p>
 
 ---
+
+## Documentation
+
+- [Download the latest release](https://github.com/GoblinRules/ClearShot/releases/latest)
+- [Step-by-step how-to guide](docs/HOW_TO.md)
+- [Troubleshooting and recording recovery](docs/TROUBLESHOOTING.md)
+- [Development and contributing](CONTRIBUTING.md)
+- [Release notes](RELEASE_NOTES.md)
+
+ClearShot runs in the Windows system tray. After launching, look beside the clock or inside the hidden-icons menu. Packaged releases support Windows 10/11 and include their runtime dependencies; Python is only needed for source runs.
 
 ## ✨ Features
 
@@ -122,6 +132,8 @@ Default recording hotkeys:
 
 Recording settings include a dedicated save folder, MP4/MKV export format, frame rate, visible recording border, hold-to-draw annotation input, microphone input, and system audio from a selected output device.
 
+Choose **No audio** (the default), **Microphone input**, or **System audio**. Microphone and system audio are separate modes; simultaneous mixing is not offered. Available frame rates are 10, 15, 20, and 30 FPS; the default is 15 FPS. Hold `Ctrl + Alt` by default to draw live annotations.
+
 Microphone choices come from Windows audio endpoints. The refresh icon updates microphone and system-output lists after reconnecting devices. Missing selections are marked unavailable; ClearShot does not silently switch microphones. Previously saved microphone names are recognized when they match an available device.
 
 Pause excludes both audio and video and freezes the REC timer. Under capture load, repeated frames preserve elapsed time instead of speeding up playback. Stop shows finalizing/exporting status; the app checks encoder results before reporting that a file was saved.
@@ -160,11 +172,14 @@ After opening the editor, you have access to a full toolbar:
 
 ### Settings
 
-Right-click the tray icon → **Settings**, or the settings window offers three tabs:
+Right-click the tray icon → **Settings**. The settings window offers four tabs:
 
 - **General** — Screenshot save location, image format, filename pattern, recording folder, recording format, audio, and border options
 - **Hotkeys** — Customize screenshot and screen recording shortcuts
 - **Startup** — Enable/disable launching ClearShot on Windows startup
+- **About** — Application information
+
+Default screenshots go to `%USERPROFILE%\Pictures\ClearShot`; recordings go to its `Recordings` subfolder. Settings are stored separately at `%APPDATA%\ClearShot\settings.json`, including for portable builds. Finish recording and exit from the tray before upgrading; extract a new portable ZIP into a fresh folder and keep its `_internal` directory alongside the EXE.
 
 ---
 
